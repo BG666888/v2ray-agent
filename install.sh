@@ -5778,10 +5778,7 @@ defaultBase64Code() {
         echoContent yellow " ---> 通用格式(VLESS+XHTTP+TLS)"
         echoContent green "    ${xhttpTLSURI}"
         echoContent yellow " ---> 格式化明文(VLESS+XHTTP+TLS)"
-        echoContent green "协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:xhttp，路径:${path}，模式:${currentXHTTPMode:-auto}，账户名:${email}\n"
-        echoContent yellow " ---> 二维码 VLESS(VLESS+XHTTP+TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dxhttp%26sni%3D${currentHost}%26host%3D${currentHost}%26fp%3Dchrome%26alpn%3Dh2%26path%3D%252F${path#/}%26mode%3D${currentXHTTPMode:-auto}%23${email}"
-        printf '%s\n' "${xhttpTLSURI}" >>"${outputRoot}/default/${user}" || return 1
+        echoContent green "协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:xhttp，路径:${path}，模式:${currentXHTTPMode:-auto}，账户名:${email}\n"printf '%s\n' "${xhttpTLSURI}" >>"${outputRoot}/default/${user}" || return 1
         buildMihomoXHTTPTLSNode "${add}" "${port}" "${id}" "${currentHost}" "${path}" "${currentXHTTPMode:-auto}" "${email}" >>"${outputRoot}/clashMeta/${user}" || return 1
         return 0
     fi
@@ -5814,9 +5811,6 @@ EOF
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${currentHost}\",\"server_port\":${port},\"uuid\":\"${id}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"packet_encoding\":\"xudp\"}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
 
-        echoContent yellow " ---> 二维码 VLESS(VLESS+TCP+TLS_Vision)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${currentHost}%3A${port}%3Fencryption%3Dnone%26fp%3Dchrome%26security%3Dtls%26type%3Dtcp%26${currentHost}%3D${currentHost}%26headerType%3Dnone%26sni%3D${currentHost}%26flow%3Dxtls-rprx-vision%23${email}\n"
-
     elif [[ "${type}" == "vmessws" ]]; then
         qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0) || return 1
         qrCodeBase64Default="${qrCodeBase64Default// /}"
@@ -5825,8 +5819,6 @@ EOF
         echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
         echoContent yellow " ---> 通用vmess(VMess+WS+TLS)链接"
         echoContent green "    vmess://${qrCodeBase64Default}\n"
-        echoContent yellow " ---> 二维码 vmess(VMess+WS+TLS)"
-
         cat <<EOF >>"${outputRoot}/default/${user}" || return 1
 vmess://${qrCodeBase64Default}
 EOF
@@ -5852,7 +5844,6 @@ EOF
 
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
 
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
 
     elif [[ "${type}" == "vlessws" ]]; then
 
@@ -5884,9 +5875,6 @@ EOF
 
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${add}\",\"server_port\":${port},\"uuid\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"multiplex\":{\"enabled\":false,\"protocol\":\"smux\",\"max_streams\":32},\"packet_encoding\":\"xudp\",\"transport\":{\"type\":\"ws\",\"path\":\"${path}\",\"headers\":{\"Host\":\"${currentHost}\"}}}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
-
-        echoContent yellow " ---> 二维码 VLESS(VLESS+WS+TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dws%26host%3D${currentHost}%26fp%3Dchrome%26sni%3D${currentHost}%26path%3D${path}%23${email}"
 
     elif [[ "${type}" == "vlessXHTTP" ]]; then
 
@@ -5925,10 +5913,6 @@ EOF
       short-id: 6ba85179e30d4fc2
       support-x25519mlkem768: true
 EOF
-
-        echoContent yellow " ---> 二维码 VLESS(VLESS+reality+XHTTP)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dxhttp%26sni%3D${xrayVLESSRealityXHTTPServerName}%26fp%3Dchrome%26path%3D${path}%26host%3D${xrayVLESSRealityXHTTPServerName}%26pbk%3D${currentRealityXHTTPPublicKey}%26sid%3D6ba85179e30d4fc2%23${email}\n"
-
     elif
         [[ "${type}" == "vlessgrpc" ]]
     then
@@ -5960,9 +5944,6 @@ EOF
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\": \"vless\",\"server\": \"${add}\",\"server_port\": ${port},\"uuid\": \"${id}\",\"tls\": {  \"enabled\": true,  \"server_name\": \"${currentHost}\",  \"utls\": {    \"enabled\": true,    \"fingerprint\": \"chrome\"  }},\"packet_encoding\": \"xudp\",\"transport\": {  \"type\": \"grpc\",  \"service_name\": \"${currentPath}grpc\"}}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
 
-        echoContent yellow " ---> 二维码 VLESS(VLESS+gRPC+TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dgrpc%26host%3D${currentHost}%26serviceName%3D${currentPath}grpc%26fp%3Dchrome%26path%3D${currentPath}grpc%26sni%3D${currentHost}%26alpn%3Dh2%23${email}"
-
     elif [[ "${type}" == "trojan" ]]; then
         # URLEncode
         echoContent yellow " ---> Trojan(TLS)"
@@ -5984,9 +5965,6 @@ EOF
 EOF
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"trojan\",\"server\":\"${currentHost}\",\"server_port\":${port},\"password\":\"${id}\",\"tls\":{\"alpn\":[\"http/1.1\"],\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}}}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
-
-        echoContent yellow " ---> 二维码 Trojan(TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=trojan%3a%2f%2f${id}%40${currentHost}%3a${port}%3fpeer%3d${currentHost}%26fp%3Dchrome%26sni%3d${currentHost}%26alpn%3Dhttp/1.1%23${email}\n"
 
     elif [[ "${type}" == "trojangrpc" ]]; then
         # URLEncode
@@ -6011,9 +5989,6 @@ EOF
 
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"trojan\",\"server\":\"${add}\",\"server_port\":${port},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"insecure\":true,\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"transport\":{\"type\":\"grpc\",\"service_name\":\"${currentPath}trojangrpc\",\"idle_timeout\":\"15s\",\"ping_timeout\":\"15s\",\"permit_without_stream\":false},\"multiplex\":{\"enabled\":false,\"protocol\":\"smux\",\"max_streams\":32}}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
-
-        echoContent yellow " ---> 二维码 Trojan gRPC(TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=trojan%3a%2f%2f${id}%40${add}%3a${port}%3Fencryption%3Dnone%26fp%3Dchrome%26security%3Dtls%26peer%3d${currentHost}%26type%3Dgrpc%26sni%3d${currentHost}%26path%3D${currentPath}trojangrpc%26alpn%3Dh2%26serviceName%3D${currentPath}trojangrpc%23${email}\n"
 
     elif [[ "${type}" == "hysteria" ]]; then
         echoContent yellow " ---> Hysteria(TLS)"
@@ -6059,9 +6034,6 @@ EOF
         singBoxSubscribeLocalConfig=$(jq --argjson node "${hysteria2Node}" '. += [$node]' "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
 
-        echoContent yellow " ---> 二维码 Hysteria2(TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=hysteria2%3A%2F%2F${id}%40${currentHost}%3A${uriPort}%3F${multiPortEncode}${speedParamsEncode}peer%3D${currentHost}%26insecure%3D0%26sni%3D${currentHost}%26alpn%3Dh3%23${email}\n"
-
     elif [[ "${type}" == "vlessReality" ]]; then
         local realityServerName=${xrayVLESSRealityServerName}
         local publicKey=${currentRealityPublicKey}
@@ -6104,9 +6076,6 @@ EOF
 
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"$(getPublicIP)\",\"server_port\":${port},\"uuid\":\"${id}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"${realityServerName}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"${publicKey}\",\"short_id\":\"6ba85179e30d4fc2\"}},\"packet_encoding\":\"xudp\"}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
-
-        echoContent yellow " ---> 二维码 VLESS(VLESS+reality+uTLS+Vision)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40$(getPublicIP)%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dtcp%26sni%3D${realityServerName}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26flow%3Dxtls-rprx-vision%23${email}\n"
 
     elif [[ "${type}" == "vlessRealityGRPC" ]]; then
         local realityServerName=${xrayVLESSRealityServerName}
@@ -6152,8 +6121,6 @@ EOF
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"$(getPublicIP)\",\"server_port\":${port},\"uuid\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${realityServerName}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"${publicKey}\",\"short_id\":\"6ba85179e30d4fc2\"}},\"packet_encoding\":\"xudp\",\"transport\":{\"type\":\"grpc\",\"service_name\":\"grpc\"}}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
 
-        echoContent yellow " ---> 二维码 VLESS(VLESS+reality+uTLS+gRPC)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40$(getPublicIP)%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dgrpc%26sni%3D${realityServerName}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26path%3Dgrpc%26serviceName%3Dgrpc%23${email}\n"
     elif [[ "${type}" == "tuic" ]]; then
         local tuicUUID=
         tuicUUID=$(echo "${id}" | awk -F "[_]" '{print $1}')
@@ -6193,8 +6160,7 @@ EOF
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\": \"tuic\",\"server\": \"${currentHost}\",\"server_port\": ${port},\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"congestion_control\": \"${tuicAlgorithm}\",\"tls\": {\"enabled\": true,\"server_name\": \"${currentHost}\",\"alpn\": [\"h3\"]}}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
 
-        echoContent yellow "\n ---> 二维码 Tuic"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=tuic%3A%2F%2F${tuicUUID}%3A${tuicPassword}%40${currentHost}%3A${tuicPort}%3Fcongestion_control%3D${tuicAlgorithm}%26alpn%3Dh3%26sni%3D${currentHost}%26udp_relay_mode%3Dquic%26allow_insecure%3D0%23${email}\n"
+
     elif [[ "${type}" == "naive" ]]; then
         echoContent yellow " ---> Naive(TLS)"
 
@@ -6202,8 +6168,6 @@ EOF
         cat <<EOF >>"${outputRoot}/default/${user}" || return 1
 naive+https://${email}:${id}@${currentHost}:${port}?padding=true#${email}
 EOF
-        echoContent yellow " ---> 二维码 Naive(TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=naive%2Bhttps%3A%2F%2F${email}%3A${id}%40${currentHost}%3A${port}%3Fpadding%3Dtrue%23${email}\n"
     elif [[ "${type}" == "vmessHTTPUpgrade" ]]; then
         qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0) || return 1
         qrCodeBase64Default="${qrCodeBase64Default// /}"
@@ -6212,8 +6176,6 @@ EOF
         echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
         echoContent yellow " ---> 通用vmess(VMess+HTTPUpgrade+TLS)链接"
         echoContent green "    vmess://${qrCodeBase64Default}\n"
-        echoContent yellow " ---> 二维码 vmess(VMess+HTTPUpgrade+TLS)"
-
         cat <<EOF >>"${outputRoot}/default/${user}" || return 1
    vmess://${qrCodeBase64Default}
 EOF
@@ -6240,7 +6202,6 @@ EOF
 
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
 
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
 
     elif [[ "${type}" == "anytls" ]]; then
         echoContent yellow " ---> AnyTLS"
@@ -6268,9 +6229,6 @@ EOF
 
         singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"anytls\",\"server\":\"${currentHost}\",\"server_port\":${singBoxAnyTLSPort},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\"}}]" "${outputRoot}/sing-box/${user}") || return 1
         echo "${singBoxSubscribeLocalConfig}" | jq . >"${outputRoot}/sing-box/${user}" || return 1
-
-        echoContent yellow " ---> 二维码 AnyTLS"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=anytls%3A%2F%2F${id}%40${currentHost}%3A${singBoxAnyTLSPort}%3Fpeer%3D${currentHost}%26insecure%3D0%26sni%3D${currentHost}%23${email}\n"
     fi
 
 }
@@ -7996,23 +7954,20 @@ aliasInstall() {
         mv "$HOME/install.sh" /etc/v2ray-agent/install.sh
         local vasmaType=
         if [[ -d "/usr/bin/" ]]; then
-            if [[ ! -f "/usr/bin/vasma" ]]; then
-                ln -s /etc/v2ray-agent/install.sh /usr/bin/vasma
-                chmod 700 /usr/bin/vasma
-                vasmaType=true
-            fi
-
+            ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasma
+            ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasgm
+            chmod 700 /usr/bin/vasma /usr/bin/vasgm
+            vasmaType=true
             rm -rf "$HOME/install.sh"
         elif [[ -d "/usr/sbin" ]]; then
-            if [[ ! -f "/usr/sbin/vasma" ]]; then
-                ln -s /etc/v2ray-agent/install.sh /usr/sbin/vasma
-                chmod 700 /usr/sbin/vasma
-                vasmaType=true
-            fi
+            ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasma
+            ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasgm
+            chmod 700 /usr/sbin/vasma /usr/sbin/vasgm
+            vasmaType=true
             rm -rf "$HOME/install.sh"
         fi
         if [[ "${vasmaType}" == "true" ]]; then
-            echoContent green "快捷方式创建成功，可执行[vasma]重新打开脚本"
+            echoContent green "快捷方式创建成功，可执行 [vasma] 或 [vasgm] 重新打开脚本"
         fi
     fi
 }
@@ -11963,7 +11918,7 @@ manageAccount() {
     echoContent skyBlue "\n======================== 账号与订阅管理 ========================"
     echoContent yellow "提示：添加/删除用户会自动同步到所有已安装的协议与订阅中"
     echoContent red "================================================================"
-    echoContent yellow "  1. 查看节点账号 (连接链接 / 二维码)"
+    echoContent yellow "  1. 查看节点账号 (连接链接 / 订阅详情)"
     echoContent yellow "  2. 查看用户订阅 (通用 Base64 / Clash.Meta / sing-box)"
     echoContent yellow "  3. 生成/更新订阅 (重新生成全部用户订阅)"
     echoContent skyBlue "----------------------------------------------------------------"
@@ -12035,41 +11990,37 @@ showUserSubscriptions() {
         echoContent yellow "  该用户尚无已生成的订阅文件，请先使用 6.生成/更新订阅。"
         return 1
     fi
+    echoContent skyBlue "\n=============================================================="
+    echoContent green   "                 【 用户订阅专属链接 】"
+    echoContent skyBlue "=============================================================="
+    echoContent yellow  "  账号标识: ${email}"
     for format in "${availableFormats[@]}"; do
         index=$((index + 1))
         case "${format}" in
         default)
-            title="通用订阅"
-            description="适用于 v2rayN、v2rayNG 等客户端"
+            title="通用格式订阅 (Base64)"
+            description="适用于 v2rayN / v2rayNG / Shadowrocket 等"
             ;;
         clashMetaProfiles)
-            title="Mihomo 订阅"
-            description="适用于 Clash Verge Rev 等客户端"
+            title="Clash Meta (Mihomo) 订阅"
+            description="适用于 Clash Verge Rev / FlClash / Mihomo Party (含精细分流)"
             ;;
         sing-box)
-            title="sing-box 订阅"
-            description="适用于 sing-box 客户端"
+            title="sing-box 客户端专属订阅"
+            description="适用于 sing-box 官方客户端 (含全新精细分流)"
             ;;
         esac
-        echo
-        echoContent white "=============================================================="
-        printf '\033[95m%02d\033[0m  ' "${index}"
+        echoContent white "──────────────────────────────────────────────────────────────"
+        printf '  \033[92m[%02d]\033[0m ' "${index}"
         echoContent skyBlue "${title}"
-        echoContent gray "${description}"
-        echo
+        echoContent gray "       适用: ${description}"
         subscriptionURL="${subscriptionScheme}://${currentDomain}/s/${format}/${emailMd5}"
-        echoContent gold "订阅链接\n"
+        echoContent yellow "       链接: \c"
         echoContent brightGreen "${subscriptionURL}"
-        echo
-        if [[ "${release}" != "alpine" ]] && command -v qrencode >/dev/null 2>&1; then
-            printf '%s\n' "${subscriptionURL}" | qrencode -s 10 -m 1 -t UTF8
-            echo
-        fi
-        echoContent gold "在线二维码\n"
-        echoContent brightGreen "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${subscriptionURL}"
     done
-    echo
-    echoContent gray "复制链接或扫描二维码导入，请妥善保管订阅链接。"
+    echoContent white "──────────────────────────────────────────────────────────────"
+    echoContent gray "  提示：复制对应链接导入客户端即可使用，请妥善保管个人订阅。"
+    echoContent skyBlue "==============================================================\n"
 
 }
 
@@ -12748,9 +12699,9 @@ subscribe() (
 
                     echoContent skyBlue " ---> 下载 sing-box 通用配置文件"
                     if [[ "${release}" == "alpine" ]]; then
-                        wget -O "${subscribePublishPath}/sing-box/${emailMd5}_download" -q "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/documents/sing-box.json" || return 1
+                        wget -O "${subscribePublishPath}/sing-box/${emailMd5}_download" -q --no-cache "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/documents/sing-box.json?t=$(date +%s)" || return 1
                     else
-                        wget -O "${subscribePublishPath}/sing-box/${emailMd5}_download" -q "${wgetShowProgressStatus}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/documents/sing-box.json" || return 1
+                        wget -O "${subscribePublishPath}/sing-box/${emailMd5}_download" -q "${wgetShowProgressStatus}" --no-cache "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/documents/sing-box.json?t=$(date +%s)" || return 1
                     fi
 
                     jq --slurpfile nodes "/etc/v2ray-agent/subscribe_local/sing-box/${email}" '
@@ -13602,9 +13553,9 @@ siteSecurityMenu() {
 # 主菜单
 menu() {
     cd "$HOME" || exit
-    echoContent red "\n================================================================"
-    echoContent green "  当前版本：v3.5.41-pr3"
-    echoContent skyBlue "  项目仓库：BG666888/v2ray-agent  |  快捷命令：vasma\c"
+    echoContent skyBlue "\n================================================================"
+    echoContent green   "         v2ray-agent (AI修改版)  -  v3.5.41-pr4"
+    echoContent skyBlue "  开源仓库: BG666888/v2ray-agent   |   快捷命令: vasma / vasgm"
     showInstallStatus
     checkWgetShowProgress
     echoContent red "\n================================================================"

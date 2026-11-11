@@ -34,16 +34,19 @@
       },
       {
         "tag": "dns_direct",
-        "type": "h3",
-        "server": "dns.alidns.com",
+        "type": "https",
+        "server": "223.5.5.5",
         "server_port": 443,
         "path": "/dns-query",
         "domain_resolver": "local"
       },
       {
-        "tag": "google",
-        "type": "tls",
-        "server": "8.8.4.4"
+        "tag": "dns_direct_pub",
+        "type": "https",
+        "server": "doh.pub",
+        "server_port": 443,
+        "path": "/dns-query",
+        "domain_resolver": "local"
       },
       {
         "type": "local",
@@ -63,7 +66,17 @@
       },
       {
         "action": "route",
-        "rule_set": "geosite-cn",
+        "rule_set": [
+          "geosite-private",
+          "geosite-cn"
+        ],
+        "server": "dns_direct"
+      },
+      {
+        "action": "route",
+        "domain_suffix": [
+          ".cn"
+        ],
         "server": "dns_direct"
       },
       {
@@ -73,7 +86,7 @@
       }
     ],
     "strategy": "prefer_ipv4",
-    "final": "dns_direct"
+    "final": "dns_proxy"
   },
   "inbounds": [
     {
@@ -98,8 +111,7 @@
     {
       "type": "urltest",
       "tag": "自动选择",
-      "outbounds": [
-      ],
+      "outbounds": [],
       "url": "https://www.gstatic.com/generate_204",
       "interval": "3m",
       "tolerance": 50,
@@ -108,7 +120,22 @@
     {
       "type": "selector",
       "tag": "手动切换",
+      "outbounds": []
+    },
+    {
+      "type": "selector",
+      "tag": "ClaudeAI",
       "outbounds": [
+        "手动切换",
+        "自动选择"
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "OpenAI",
+      "outbounds": [
+        "手动切换",
+        "自动选择"
       ]
     },
     {
@@ -137,10 +164,19 @@
     },
     {
       "type": "selector",
-      "tag": "OpenAI",
+      "tag": "Google",
       "outbounds": [
         "手动切换",
         "自动选择"
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "Github",
+      "outbounds": [
+        "手动切换",
+        "自动选择",
+        "direct"
       ]
     },
     {
@@ -154,24 +190,7 @@
     },
     {
       "type": "selector",
-      "tag": "Google",
-      "outbounds": [
-        "手动切换",
-        "自动选择"
-      ]
-    },
-    {
-      "type": "selector",
       "tag": "Microsoft",
-      "outbounds": [
-        "手动切换",
-        "自动选择",
-        "direct"
-      ]
-    },
-    {
-      "type": "selector",
-      "tag": "Github",
       "outbounds": [
         "手动切换",
         "自动选择",
@@ -215,6 +234,27 @@
         "update_interval": "1d"
       },
       {
+        "tag": "geosite-anthropic",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/anthropic.srs",
+        "update_interval": "1d"
+      },
+      {
+        "tag": "geosite-openai@ads",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai@ads.srs",
+        "update_interval": "1d"
+      },
+      {
+        "tag": "geosite-openai",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai.srs",
+        "update_interval": "1d"
+      },
+      {
         "tag": "geosite-telegram",
         "type": "remote",
         "format": "binary",
@@ -250,27 +290,6 @@
         "update_interval": "1d"
       },
       {
-        "tag": "geosite-openai@ads",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai@ads.srs",
-        "update_interval": "1d"
-      },
-      {
-        "tag": "geosite-openai",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai.srs",
-        "update_interval": "1d"
-      },
-      {
-        "tag": "geosite-apple",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/apple.srs",
-        "update_interval": "1d"
-      },
-      {
         "tag": "geosite-google",
         "type": "remote",
         "format": "binary",
@@ -285,6 +304,20 @@
         "update_interval": "1d"
       },
       {
+        "tag": "geosite-github",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/github.srs",
+        "update_interval": "1d"
+      },
+      {
+        "tag": "geosite-apple",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/apple.srs",
+        "update_interval": "1d"
+      },
+      {
         "tag": "geosite-microsoft",
         "type": "remote",
         "format": "binary",
@@ -296,13 +329,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/geolocation-!cn.srs",
-        "update_interval": "1d"
-      },
-      {
-        "tag": "geosite-github",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/github.srs",
         "update_interval": "1d"
       },
       {
@@ -387,6 +413,39 @@
         "outbound": "Telegram"
       },
       {
+        "rule_set": "geosite-anthropic",
+        "outbound": "ClaudeAI"
+      },
+      {
+        "domain_suffix": [
+          "claude.ai",
+          "claude.com",
+          "anthropic.com",
+          "claudeusercontent.com"
+        ],
+        "outbound": "ClaudeAI"
+      },
+      {
+        "rule_set": "geosite-openai@ads",
+        "action": "reject",
+        "method": "default",
+        "no_drop": false
+      },
+      {
+        "rule_set": "geosite-openai",
+        "outbound": "OpenAI"
+      },
+      {
+        "domain_suffix": [
+          "chatgpt.com",
+          "openai.com",
+          "oaistatic.com",
+          "oaiusercontent.com",
+          "sora.com"
+        ],
+        "outbound": "OpenAI"
+      },
+      {
         "rule_set": "geosite-youtube",
         "outbound": "YouTube"
       },
@@ -398,34 +457,6 @@
         "outbound": "netflix"
       },
       {
-        "rule_set": "geosite-openai@ads",
-        "action": "reject",
-        "method": "default",
-        "no_drop": false
-      },
-      {
-        "domain_suffix": [
-          "claude.ai",
-          "claude.com",
-          "anthropic.com",
-          "claudeusercontent.com",
-          "chatgpt.com",
-          "openai.com",
-          "oaistatic.com",
-          "oaiusercontent.com",
-          "sora.com"
-        ],
-        "outbound": "OpenAI"
-      },
-      {
-        "rule_set": "geosite-openai",
-        "outbound": "OpenAI"
-      },
-      {
-        "rule_set": "geosite-apple",
-        "outbound": "Apple"
-      },
-      {
         "rule_set": [
           "geosite-google",
           "geoip-google"
@@ -433,12 +464,16 @@
         "outbound": "Google"
       },
       {
-        "rule_set": "geosite-microsoft",
-        "outbound": "Microsoft"
-      },
-      {
         "rule_set": "geosite-github",
         "outbound": "Github"
+      },
+      {
+        "rule_set": "geosite-apple",
+        "outbound": "Apple"
+      },
+      {
+        "rule_set": "geosite-microsoft",
+        "outbound": "Microsoft"
       },
       {
         "rule_set": [
@@ -448,8 +483,14 @@
         "outbound": "本地直连"
       },
       {
+        "domain_suffix": [
+          ".cn"
+        ],
+        "outbound": "本地直连"
+      },
+      {
         "rule_set": "geosite-geolocation-!cn",
-        "outbound": "手动切换"
+        "outbound": "自动选择"
       },
       {
         "rule_set": [
