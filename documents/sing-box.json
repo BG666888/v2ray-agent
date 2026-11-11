@@ -37,8 +37,7 @@
         "type": "https",
         "server": "223.5.5.5",
         "server_port": 443,
-        "path": "/dns-query",
-        "domain_resolver": "local"
+        "path": "/dns-query"
       },
       {
         "tag": "dns_direct_pub",
@@ -120,7 +119,9 @@
     {
       "type": "selector",
       "tag": "手动切换",
-      "outbounds": []
+      "outbounds": [
+        "自动选择"
+      ]
     },
     {
       "type": "selector",
@@ -490,7 +491,7 @@
       },
       {
         "rule_set": "geosite-geolocation-!cn",
-        "outbound": "自动选择"
+        "outbound": "手动切换"
       },
       {
         "rule_set": [

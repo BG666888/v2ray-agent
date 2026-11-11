@@ -2518,9 +2518,9 @@ nginxBlog() {
             #  randomNum=$((RANDOM % 6 + 1))
             randomNum=$(randomNum 1 9)
             if [[ "${release}" == "alpine" ]]; then
-                wget -q -P "${nginxStaticPath}" "https://raw.githubusercontent.com/mack-a/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
+                wget -q -P "${nginxStaticPath}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
             else
-                wget -q "${wgetShowProgressStatus}" -P "${nginxStaticPath}" "https://raw.githubusercontent.com/mack-a/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
+                wget -q "${wgetShowProgressStatus}" -P "${nginxStaticPath}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
             fi
 
             unzip -o "${nginxStaticPath}html${randomNum}.zip" -d "${nginxStaticPath}" >/dev/null
@@ -2533,9 +2533,9 @@ nginxBlog() {
         rm -rf "${nginxStaticPath}*"
 
         if [[ "${release}" == "alpine" ]]; then
-            wget -q -P "${nginxStaticPath}" "https://raw.githubusercontent.com/mack-a/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
+            wget -q -P "${nginxStaticPath}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
         else
-            wget -q "${wgetShowProgressStatus}" -P "${nginxStaticPath}" "https://raw.githubusercontent.com/mack-a/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
+            wget -q "${wgetShowProgressStatus}" -P "${nginxStaticPath}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/fodder/blog/unable/html${randomNum}.zip"
         fi
 
         unzip -o "${nginxStaticPath}html${randomNum}.zip" -d "${nginxStaticPath}" >/dev/null
@@ -5778,7 +5778,8 @@ defaultBase64Code() {
         echoContent yellow " ---> 通用格式(VLESS+XHTTP+TLS)"
         echoContent green "    ${xhttpTLSURI}"
         echoContent yellow " ---> 格式化明文(VLESS+XHTTP+TLS)"
-        echoContent green "协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:xhttp，路径:${path}，模式:${currentXHTTPMode:-auto}，账户名:${email}\n"printf '%s\n' "${xhttpTLSURI}" >>"${outputRoot}/default/${user}" || return 1
+        echoContent green "协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:xhttp，路径:${path}，模式:${currentXHTTPMode:-auto}，账户名:${email}\n"
+        printf '%s\n' "${xhttpTLSURI}" >>"${outputRoot}/default/${user}" || return 1
         buildMihomoXHTTPTLSNode "${add}" "${port}" "${id}" "${currentHost}" "${path}" "${currentXHTTPMode:-auto}" "${email}" >>"${outputRoot}/clashMeta/${user}" || return 1
         return 0
     fi
@@ -6809,9 +6810,9 @@ updateNginxBlog() {
         rm -rf "${nginxStaticPath}*"
 
         if [[ "${release}" == "alpine" ]]; then
-            wget -q -P "${nginxStaticPath}" "https://raw.githubusercontent.com/mack-a/v2ray-agent/master/fodder/blog/unable/html${selectInstallNginxBlogType}.zip"
+            wget -q -P "${nginxStaticPath}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/fodder/blog/unable/html${selectInstallNginxBlogType}.zip"
         else
-            wget -q "${wgetShowProgressStatus}" -P "${nginxStaticPath}" "https://raw.githubusercontent.com/mack-a/v2ray-agent/master/fodder/blog/unable/html${selectInstallNginxBlogType}.zip"
+            wget -q "${wgetShowProgressStatus}" -P "${nginxStaticPath}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/fodder/blog/unable/html${selectInstallNginxBlogType}.zip"
         fi
 
         unzip -o "${nginxStaticPath}html${selectInstallNginxBlogType}.zip" -d "${nginxStaticPath}" >/dev/null
@@ -7809,13 +7810,14 @@ updateV2RayAgent() {
         return 1
     fi
     local version
-    version=$(grep '当前版本：v' "/etc/v2ray-agent/install.sh" | awk -F "[v]" '{print $2}' | tail -n +2 | head -n 1 | awk -F "[\"]" '{print $1}')
+    version=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-pr[0-9]+)?' "/etc/v2ray-agent/install.sh" | head -n 1)
+    aliasInstall
 
     echoContent green "\n ---> 更新完毕"
-    echoContent yellow " ---> 请手动执行[vasma]打开脚本"
+    echoContent yellow " ---> 请手动执行 [vasma] 或 [vasgm] 打开脚本"
     echoContent green " ---> 当前版本：${version}\n"
     echoContent yellow "如更新不成功，请手动执行下面命令\n"
-    echoContent skyBlue "wget -P /root -N --no-check-certificate https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh && chmod 700 /root/install.sh && /root/install.sh"
+    echoContent skyBlue "wget -P /root -N --no-check-certificate \"https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh?t=\$(date +%s)\" && chmod 700 /root/install.sh && /root/install.sh"
     echo
     exit 0
 }
@@ -7949,22 +7951,26 @@ EOF
 
 # 脚本快捷方式
 aliasInstall() {
-
-    if [[ -f "$HOME/install.sh" ]] && [[ -d "/etc/v2ray-agent" ]] && grep <"$HOME/install.sh" -q "作者:mack-a"; then
-        mv "$HOME/install.sh" /etc/v2ray-agent/install.sh
-        local vasmaType=
+    local vasmaType=
+    if [[ -f "$HOME/install.sh" ]] && [[ -d "/etc/v2ray-agent" ]] && grep -q "v2ray-agent" "$HOME/install.sh"; then
+        mv -f "$HOME/install.sh" /etc/v2ray-agent/install.sh
+        chmod 700 /etc/v2ray-agent/install.sh
+        vasmaType=true
+    fi
+    if [[ -f "/etc/v2ray-agent/install.sh" ]]; then
+        chmod 700 /etc/v2ray-agent/install.sh 2>/dev/null || true
         if [[ -d "/usr/bin/" ]]; then
-            ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasma
-            ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasgm
-            chmod 700 /usr/bin/vasma /usr/bin/vasgm
-            vasmaType=true
-            rm -rf "$HOME/install.sh"
+            if [[ ! -L "/usr/bin/vasma" || ! -L "/usr/bin/vasgm" ]]; then
+                ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasma
+                ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasgm
+                chmod 700 /usr/bin/vasma /usr/bin/vasgm 2>/dev/null || true
+            fi
         elif [[ -d "/usr/sbin" ]]; then
-            ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasma
-            ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasgm
-            chmod 700 /usr/sbin/vasma /usr/sbin/vasgm
-            vasmaType=true
-            rm -rf "$HOME/install.sh"
+            if [[ ! -L "/usr/sbin/vasma" || ! -L "/usr/sbin/vasgm" ]]; then
+                ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasma
+                ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasgm
+                chmod 700 /usr/sbin/vasma /usr/sbin/vasgm 2>/dev/null || true
+            fi
         fi
         if [[ "${vasmaType}" == "true" ]]; then
             echoContent green "快捷方式创建成功，可执行 [vasma] 或 [vasgm] 重新打开脚本"
@@ -11983,17 +11989,15 @@ showUserSubscriptions() {
         file="${publishDir}/${format}/${emailMd5}"
         [[ -s "${file}" ]] && availableFormats+=("${format}")
     done
-    echoContent skyBlue "=============================================================="
-    echoContent brightPurple "\n用户订阅"
-    printf '\n用户 \033[93m%s\033[0m  /  可用订阅 \033[93m%s\033[0m 种' "${subscriptionUser}" "${#availableFormats[@]}"
-    if [[ ${#availableFormats[@]} -eq 0 ]]; then
-        echoContent yellow "  该用户尚无已生成的订阅文件，请先使用 6.生成/更新订阅。"
-        return 1
-    fi
     echoContent skyBlue "\n=============================================================="
     echoContent green   "                 【 用户订阅专属链接 】"
     echoContent skyBlue "=============================================================="
-    echoContent yellow  "  账号标识: ${email}"
+    printf '  账号标识: \033[93m%s\033[0m   |   可用订阅: \033[93m%s\033[0m 种\n' "${subscriptionUser}" "${#availableFormats[@]}"
+    if [[ ${#availableFormats[@]} -eq 0 ]]; then
+        echoContent yellow "  该用户尚无已生成的订阅文件，请先使用 [3. 生成/更新订阅]。"
+        echoContent skyBlue "==============================================================\n"
+        return 1
+    fi
     for format in "${availableFormats[@]}"; do
         index=$((index + 1))
         case "${format}" in
@@ -13554,8 +13558,8 @@ siteSecurityMenu() {
 menu() {
     cd "$HOME" || exit
     echoContent skyBlue "\n================================================================"
-    echoContent green   "         v2ray-agent (AI修改版)  -  v3.5.41-pr4"
-    echoContent skyBlue "  开源仓库: BG666888/v2ray-agent   |   快捷命令: vasma / vasgm"
+    echoContent green   "  当前版本：v3.5.41-pr5  (AI修改版)"
+    echoContent skyBlue "  开源仓库：BG666888/v2ray-agent   |   快捷命令：vasma / vasgm\c"
     showInstallStatus
     checkWgetShowProgress
     echoContent red "\n================================================================"
