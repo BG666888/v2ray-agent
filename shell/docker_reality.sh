@@ -1614,10 +1614,9 @@ promptExistingInstallAction() {
     fi
 
     echoContent "skyBlue" ""
-    echoContent green "作者：mack-a"
-    echoContent green "当前版本：v0.0.1"
-    echoContent green "Github：https://github.com/mack-a/v2ray-agent"
-    echoContent green "描述：八合一docker版"
+    echoContent green "  v2ray-agent (Docker Reality AI修改版)  -  v3.5.41-pr5"
+    echoContent green "  开源仓库：https://github.com/BG666888/v2ray-agent"
+    echoContent green "  快捷命令：vasmad"
     if [[ ${hasConfig} -ne 0 && ${hasContainer} -ne 0 ]]; then
         echoContent "skyBlue" "─── 未检测到现有 Docker Reality 安装 ─────────────────────"
         echoContent "white" "未检测到配置文件与容器，请选择下一步操作："
@@ -1720,15 +1719,6 @@ showVisionAccount() {
         echoContent "yellow" " ---> Vision 账号信息不完整，已跳过订阅链接输出"
         return 0
     fi
-    qrData="${vlessLink//:/%3A}"
-    qrData="${qrData//\//%2F}"
-    qrData="${qrData//@/%40}"
-    qrData="${qrData//\?/%3F}"
-    qrData="${qrData//&/%26}"
-    qrData="${qrData//#/%23}"
-    qrData="${qrData//=/%3D}"
-    qrLink="https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${qrData}"
-
     echoContent "skyBlue" "============================= VLESS reality_vision [推荐]  =============================="
     echoContent "skyBlue" ""
     echoContent "skyBlue" " ---> 账号:${displayEmail}"
@@ -1738,9 +1728,6 @@ showVisionAccount() {
     echoContent "white" ""
     echoContent "yellow" " ---> 格式化明文(VLESS+reality+uTLS+Vision)"
     echoContent "green" "协议类型:VLESS reality，地址:${displayAddress}，publicKey:${displayPublicKey}，shortId: ${displayShortId}，serverNames：${displayServerName}，端口:${displayPort}，用户ID:${displayUUID}，传输方式:tcp，账户名:${displayEmail}"
-    echoContent "white" ""
-    echoContent "yellow" " ---> 二维码 VLESS(VLESS+reality+uTLS+Vision)"
-    echoContent "green" "    ${qrLink}"
 }
 
 # showXHTTPAccount — 以 install.sh showAccounts 风格展示 XHTTP 账号。
@@ -1765,8 +1752,6 @@ showXHTTPAccount() {
         echoContent "yellow" " ---> XHTTP 账号信息不完整，已跳过订阅链接输出"
         return 0
     fi
-    qrLink="https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${displayUUID}%40${displayAddress}%3A${displayPort}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dxhttp%26sni%3D${displayServerName}%26fp%3Dchrome%26path%3D${displayPath}%26host%3D${displayServerName}%26pbk%3D${displayPublicKey}%26sid%3D${displayShortId}%23${displayEmail}"
-
     echoContent "skyBlue" "============================= VLESS reality_xhttp  =============================="
     echoContent "skyBlue" ""
     echoContent "skyBlue" " ---> 账号:${displayEmail}"
@@ -1776,9 +1761,6 @@ showXHTTPAccount() {
     echoContent "white" ""
     echoContent "yellow" " ---> 格式化明文(VLESS+reality+xhttp)"
     echoContent "green" "协议类型:VLESS reality，地址:${displayAddress}，publicKey:${displayPublicKey}，shortId: ${displayShortId}，serverNames：${displayServerName}，端口:${displayPort}，路径：${displayPath}，SNI:${displayServerName}，伪装域名:${displayServerName}，用户ID:${displayUUID}，传输方式:xhttp，账户名:${displayEmail}"
-    echoContent "white" ""
-    echoContent "yellow" " ---> 二维码 VLESS(VLESS+reality+xhttp)"
-    echoContent "green" "    ${qrLink}"
 }
 
 # showChineseSubscriptionSection — 输出本地中文订阅内容与风险提示。
@@ -1873,13 +1855,11 @@ showChineseSubscriptionSection() {
     echoContent "white" ""
     echoContent "green" "email: ${subscribeName}"
     echoContent "yellow" "url: ${subscribeURL}"
-    echoContent "yellow" "在线二维码: https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$(urlEncode "${subscribeURL}")"
     if [[ -n "${clashProfileURL}" ]]; then
         echo
         echoContent "skyBlue" "--------------Clash Verge(mihomo)订阅--------------"
         echo
         echoContent "yellow" "url: ${clashProfileURL}"
-        echoContent "yellow" "在线二维码: https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$(urlEncode "${clashProfileURL}")"
     fi
 }
 

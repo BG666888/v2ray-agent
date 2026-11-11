@@ -13558,7 +13558,7 @@ siteSecurityMenu() {
 menu() {
     cd "$HOME" || exit
     echoContent skyBlue "\n================================================================"
-    echoContent green   "  当前版本：v3.5.41-pr5  (AI修改版)"
+    echoContent green   "  当前版本：v3.5.41-pr6  (AI修改版)"
     echoContent skyBlue "  开源仓库：BG666888/v2ray-agent   |   快捷命令：vasma / vasgm\c"
     showInstallStatus
     checkWgetShowProgress
