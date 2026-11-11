@@ -59,7 +59,7 @@ Docker 版日常管理快捷命令：`vasmad`
 
 ```text
 ================================================================
-  当前版本：v3.5.41
+  当前版本：v3.5.41-pr1
   项目仓库：BG666888/v2ray-agent  |  快捷命令：vasma
   运行核心 : Xray-core [运行中]
   已装协议 : VLESS+Reality[Vision] | Hysteria2

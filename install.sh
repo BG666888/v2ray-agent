@@ -13520,7 +13520,7 @@ siteSecurityMenu() {
 menu() {
     cd "$HOME" || exit
     echoContent red "\n================================================================"
-    echoContent green "  当前版本：v3.5.41"
+    echoContent green "  当前版本：v3.5.41-pr1"
     echoContent skyBlue "  项目仓库：BG666888/v2ray-agent  |  快捷命令：vasma\c"
     showInstallStatus
     checkWgetShowProgress
