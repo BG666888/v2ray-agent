@@ -12945,9 +12945,9 @@ checkRealityDest() {
 initRealityClientServersName() {
     local realityDestDomainList=
     if [[ "${coreInstallType}" == "1" || "${selectCoreType}" == "1" ]]; then
-        realityDestDomainList="download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,lol.secure.dyn.riotcdn.net,www.lovelive-anime.jp,academy.nvidia.com,dl.google.com,www.google-analytics.com,www.caltech.edu,www.calstatela.edu,www.suny.edu,www.suffolk.edu,www.python.org,vuejs-jp.org,vuejs.org,zh-hk.vuejs.org,react.dev,www.java.com,www.oracle.com,www.mysql.com,www.mongodb.com,redis.io,cname.vercel-dns.com,vercel-dns.com,www.swift.com,academy.nvidia.com,www.swift.com,www.cisco.com,www.asus.com,www.samsung.com,www.amd.com,www.umcg.nl,www.fom-international.com,www.u-can.co.jp,github.io"
+        realityDestDomainList="www.samsung.com,aws.amazon.com,download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,lol.secure.dyn.riotcdn.net,www.lovelive-anime.jp,academy.nvidia.com,dl.google.com,www.google-analytics.com,www.caltech.edu,www.calstatela.edu,www.suny.edu,www.suffolk.edu,www.python.org,vuejs-jp.org,vuejs.org,zh-hk.vuejs.org,react.dev,www.java.com,www.oracle.com,www.mysql.com,www.mongodb.com,redis.io,cname.vercel-dns.com,vercel-dns.com,www.swift.com,academy.nvidia.com,www.swift.com,www.cisco.com,www.asus.com,www.amd.com,www.umcg.nl,www.fom-international.com,www.u-can.co.jp,github.io"
     elif [[ "${coreInstallType}" == "2" || "${selectCoreType}" == "2" ]]; then
-        realityDestDomainList="download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,www.lovelive-anime.jp,academy.nvidia.com,dl.google.com,www.google-analytics.com,www.python.org,vuejs-jp.org,vuejs.org,zh-hk.vuejs.org,react.dev,www.oracle.com,www.mysql.com,www.mongodb.com,cname.vercel-dns.com,vercel-dns.com,www.swift.com,academy.nvidia.com,www.swift.com,www.cisco.com,www.asus.com,www.samsung.com,www.amd.com,www.fom-international.com,github.io"
+        realityDestDomainList="www.samsung.com,aws.amazon.com,download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,www.lovelive-anime.jp,academy.nvidia.com,dl.google.com,www.google-analytics.com,www.python.org,vuejs-jp.org,vuejs.org,zh-hk.vuejs.org,react.dev,www.oracle.com,www.mysql.com,www.mongodb.com,cname.vercel-dns.com,vercel-dns.com,www.swift.com,academy.nvidia.com,www.swift.com,www.cisco.com,www.asus.com,www.amd.com,www.fom-international.com,github.io"
     fi
     if [[ -n "${realityServerName}" && -z "${lastInstallationConfig}" ]]; then
         if echo ${realityDestDomainList} | grep -q "${realityServerName}"; then
@@ -12996,10 +12996,15 @@ initRealityClientServersName() {
         if [[ -z "${realityServerName}" ]]; then
             realityDomainPort=443
             echoContent skyBlue "\n================ 配置客户端可用的serverNames ===============\n"
-            echoContent yellow "#注意事项"
-            echoContent green "Reality目标可用域名列表：https://www.v2ray-agent.com/archives/1689439383686#heading-3\n"
-            echoContent yellow "录入示例:addons.mozilla.org:443\n"
-            read -r -p "请输入目标域名，[回车]随机域名，默认端口443:" realityServerName
+            echoContent yellow "常用推荐 SNI 参考："
+            echoContent green  "  1. www.samsung.com"
+            echoContent green  "  2. aws.amazon.com"
+            echoContent yellow "录入示例: www.samsung.com:443\n"
+            read -r -p "请输入目标域名 [1/2 快捷选择，回车随机域名，默认端口443]: " realityServerName
+            case "${realityServerName}" in
+            1) realityServerName="www.samsung.com" ;;
+            2) realityServerName="aws.amazon.com" ;;
+            esac
             if [[ -z "${realityServerName}" ]]; then
                 count=$(echo ${realityDestDomainList} | awk -F',' '{print NF}')
                 randomNum=$(randomNum 1 "${count}")
@@ -13192,21 +13197,15 @@ manageReality() {
     1)
         echoContent skyBlue "\n----------------------- 更换伪装域名 (SNI) -----------------------"
         echoContent yellow "常用推荐 SNI 参考："
-        echoContent green  "  1. itunes.apple.com"
-        echoContent green  "  2. swdist.apple.com"
-        echoContent green  "  3. addons.mozilla.org"
-        echoContent green  "  4. www.lovelive-anime.jp"
-        echoContent green  "  5. gateway.icloud.com"
+        echoContent green  "  1. www.samsung.com"
+        echoContent green  "  2. aws.amazon.com"
         echo
         local newSni
-        read -r -p "请输入新的伪装域名 [直接输入数字 1-5 可快速选择，也可输入自定义域名]: " newSni
+        read -r -p "请输入新的伪装域名 [直接输入数字 1-2 可快速选择，也可输入自定义域名]: " newSni
 
         case "${newSni}" in
-        1) newSni="itunes.apple.com" ;;
-        2) newSni="swdist.apple.com" ;;
-        3) newSni="addons.mozilla.org" ;;
-        4) newSni="www.lovelive-anime.jp" ;;
-        5) newSni="gateway.icloud.com" ;;
+        1) newSni="www.samsung.com" ;;
+        2) newSni="aws.amazon.com" ;;
         esac
 
         if [[ -z "${newSni}" ]]; then
@@ -13558,7 +13557,7 @@ siteSecurityMenu() {
 menu() {
     cd "$HOME" || exit
     echoContent skyBlue "\n================================================================"
-    echoContent green   "  当前版本：v3.5.41-pr6  (AI修改版)"
+    echoContent green   "  当前版本：v3.5.41-pr7  (AI修改版)"
     echoContent skyBlue "  开源仓库：BG666888/v2ray-agent   |   快捷命令：vasma / vasgm\c"
     showInstallStatus
     checkWgetShowProgress

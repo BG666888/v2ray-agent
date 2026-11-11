@@ -952,7 +952,7 @@ xrayImagePreflight() {
 # _realityDomainList — 精选的 Reality 目标域名列表，与 install.sh:9618 保持同步
 # 返回逗号分隔的域名字符串（Xray-core 列表）
 _realityDomainList() {
-    printf '%s' "download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,lol.secure.dyn.riotcdn.net,www.lovelive-anime.jp,academy.nvidia.com,dl.google.com,www.google-analytics.com,www.caltech.edu,www.calstatela.edu,www.suny.edu,www.suffolk.edu,www.python.org,vuejs-jp.org,vuejs.org,zh-hk.vuejs.org,react.dev,www.java.com,www.oracle.com,www.mysql.com,www.mongodb.com,redis.io,cname.vercel-dns.com,vercel-dns.com,www.swift.com,academy.nvidia.com,www.swift.com,www.cisco.com,www.asus.com,www.samsung.com,www.amd.com,www.umcg.nl,www.fom-international.com,www.u-can.co.jp,github.io"
+    printf '%s' "www.samsung.com,aws.amazon.com,download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,lol.secure.dyn.riotcdn.net,www.lovelive-anime.jp,academy.nvidia.com,dl.google.com,www.google-analytics.com,www.caltech.edu,www.calstatela.edu,www.suny.edu,www.suffolk.edu,www.python.org,vuejs-jp.org,vuejs.org,zh-hk.vuejs.org,react.dev,www.java.com,www.oracle.com,www.mysql.com,www.mongodb.com,redis.io,cname.vercel-dns.com,vercel-dns.com,www.swift.com,academy.nvidia.com,www.swift.com,www.cisco.com,www.asus.com,www.amd.com,www.umcg.nl,www.fom-international.com,www.u-can.co.jp,github.io"
 }
 
 # parsePort — 验证并规范化端口值。
@@ -1024,6 +1024,10 @@ checkPortInUse() {
 # 成功返回 0。
 parseServerName() {
     local raw="$1"
+    case "${raw}" in
+    1) raw="www.samsung.com" ;;
+    2) raw="aws.amazon.com" ;;
+    esac
     if [[ -z "${raw}" ]]; then
         # 留空 → 从精选列表随机选取（与 install.sh:9673-9678 保持一致）
         local domainList count randomIdx
