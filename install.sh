@@ -7840,7 +7840,7 @@ updateV2RayAgent() {
     echoContent skyBlue "\n进度  $1/${totalProgress} : 更新v2ray-agent脚本"
     local scriptTemp
     scriptTemp=$(mktemp /etc/v2ray-agent/.install.XXXXXX) || return 1
-    if ! wget -q -O "${scriptTemp}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh" ||
+    if ! wget --no-cache -q -O "${scriptTemp}" "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh?t=$(date +%s)" ||
         [[ ! -s "${scriptTemp}" ]] || ! bash -n "${scriptTemp}"; then
         rm -f "${scriptTemp}"
         echoContent red " ---> 脚本下载或校验失败，保留当前版本"
@@ -12289,6 +12289,8 @@ profile:
 
 sniffer:
   enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
   override-destination: false
   sniff:
     QUIC:
@@ -12296,13 +12298,14 @@ sniffer:
     TLS:
       ports: [ 443 ]
     HTTP:
-      ports: [ 80 ]
+      ports: [ 80, 8080-8880 ]
 
 dns:
   enable: true
   prefer-h3: false
   listen: 0.0.0.0:1053
   ipv6: false
+  respect-rules: true
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
@@ -12322,16 +12325,18 @@ dns:
   proxy-server-nameserver:
     - https://223.5.5.5/dns-query
     - https://doh.pub/dns-query
+  # 默认 DNS 强制走代理隧道（彻底杜绝访问随机海外测试域名时泄露国内 DNS）
   nameserver:
-    - https://223.5.5.5/dns-query
-    - https://doh.pub/dns-query
+    - https://1.1.1.1/dns-query#DNS_Proxy
+    - https://8.8.8.8/dns-query#DNS_Proxy
+  # 仅明确属于中国大陆与局域网的域名才使用国内 DoH 解析
   nameserver-policy:
-    "rule-set:ChinaMaxDomain,Lan":
+    '+.cn':
       - https://223.5.5.5/dns-query
       - https://doh.pub/dns-query
-    "rule-set:GlobalDomain,OpenAI,ClaudeAI,Bing,YouTube,Google,GitHub,Telegram,Netflix,Spotify,HBO,Disney":
-      - https://1.1.1.1/dns-query#DNS_Proxy
-      - https://8.8.8.8/dns-query#DNS_Proxy
+    "rule-set:ChinaMaxDomain,ChinaMedia,Lan":
+      - https://223.5.5.5/dns-query
+      - https://doh.pub/dns-query
 
 ${proxiesBlock}
 
@@ -12593,16 +12598,17 @@ rules:
 
   # 5. 国内媒体与大陆全量域名优先直连（置于 GlobalDomain 之前，确保国内网站 100% 优先直连）
   - RULE-SET,ChinaMedia,国内媒体,no-resolve
+  - DOMAIN-SUFFIX,cn,本地直连
   - RULE-SET,ChinaMaxDomain,本地直连
 
   # 6. 全球海外加速域名
   - RULE-SET,GlobalDomain,全球代理
 
-  # 7. 大陆 IP 段与 GEOIP 兜底直连
+  # 7. 大陆 IP 段与 GEOIP 兜底直连（必须加 no-resolve，防止对未知海外域名触发本地 DNS 解析导致 DNS 泄露）
   - RULE-SET,ChinaMaxIPNoIPv6,本地直连,no-resolve
-  - GEOIP,CN,本地直连
+  - GEOIP,CN,本地直连,no-resolve
 
-  # 8. 最终兜底
+  # 8. 最终兜底（所有未匹配的海外及随机测试域名直接发往代理远端解析，零 DNS 泄露）
   - MATCH,漏网之鱼
 EOF
 
@@ -13597,7 +13603,7 @@ siteSecurityMenu() {
 menu() {
     cd "$HOME" || exit
     echoContent red "\n================================================================"
-    echoContent green "  当前版本：v3.5.41-pr2"
+    echoContent green "  当前版本：v3.5.41-pr3"
     echoContent skyBlue "  项目仓库：BG666888/v2ray-agent  |  快捷命令：vasma\c"
     showInstallStatus
     checkWgetShowProgress
