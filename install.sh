@@ -6965,7 +6965,26 @@ portManagement() {
         fi
     fi
 
-    # 4c. Trojan TCP (TLS)
+    # 4c. VLESS XHTTP (TLS)
+    if echo "${currentInstallProtocolType}" | grep -q ",14,"; then
+        local pFile="" pPort="" pCore=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}14_VLESS_XHTTP_TLS_inbounds.json" ]]; then
+            pFile="${configPath}14_VLESS_XHTTP_TLS_inbounds.json"
+            pPort=$(jq -r '.inbounds[1].port // empty' "${pFile}")
+            pCore="xray"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            index=$((index + 1))
+            protocolNames+=("VLESS XHTTP (TLS)")
+            protocolFiles+=("${pFile}")
+            protocolPorts+=("${pPort}")
+            protocolTypes+=("tcp")
+            protocolCores+=("${pCore}")
+            echoContent yellow "${index}. VLESS XHTTP (TLS) 当前端口: ${pPort}"
+        fi
+    fi
+
+    # 4d. Trojan TCP (TLS)
     if echo "${currentInstallProtocolType}" | grep -q ",4,"; then
         local pFile="" pPort="" pCore=""
         if [[ "${coreInstallType}" == "1" && -f "${configPath}04_trojan_TCP_inbounds.json" ]]; then
@@ -7084,7 +7103,11 @@ portManagement() {
             /etc/init.d/nginx restart >/dev/null 2>&1
         fi
     elif [[ "${targetCore}" == "xray" ]]; then
-        jq --argjson p "${newPort}" '.inbounds[0].port = $p' "${targetFile}" > "${targetFile}.tmp" && mv -f "${targetFile}.tmp" "${targetFile}"
+        if jq -e '.inbounds[1].protocol == "dokodemo-door"' "${targetFile}" >/dev/null 2>&1; then
+            jq --argjson p "${newPort}" '.inbounds[1].port = $p' "${targetFile}" > "${targetFile}.tmp" && mv -f "${targetFile}.tmp" "${targetFile}"
+        else
+            jq --argjson p "${newPort}" '.inbounds[0].port = $p' "${targetFile}" > "${targetFile}.tmp" && mv -f "${targetFile}.tmp" "${targetFile}"
+        fi
     elif [[ "${targetCore}" == "sing-box" ]]; then
         jq --argjson p "${newPort}" '.inbounds[0].listen_port = $p' "${targetFile}" > "${targetFile}.tmp" && mv -f "${targetFile}.tmp" "${targetFile}"
     fi
@@ -12221,6 +12244,9 @@ clashMetaConfig() {
         proxiesBlock=$(cat "${publishPath}/clashMeta/${id}")
         proxyNamesList=$(grep -E '^[[:space:]]*-[[:space:]]*name:' "${publishPath}/clashMeta/${id}" | sed -E 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/      - /')
     fi
+    if [[ -z "${proxyNamesList}" ]]; then
+        proxyNamesList="      - DIRECT"
+    fi
     cat <<EOF >"${publishPath}/clashMetaProfiles/${id}"
 log-level: info
 mode: rule
@@ -13234,8 +13260,10 @@ manageReality() {
         if [[ "${coreInstallType}" == "1" && -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
             local file="${configPath}07_VLESS_vision_reality_inbounds.json"
             jq --arg sni "${newSni}" --arg target "${target}" \
-                '.inbounds[1].streamSettings.realitySettings.serverNames = [$sni] |
-                 .inbounds[1].streamSettings.realitySettings.target = $target' \
+                '.inbounds |= map(if .streamSettings.realitySettings then
+                    .streamSettings.realitySettings.serverNames = [$sni] |
+                    .streamSettings.realitySettings.target = $target
+                  else . end)' \
                 "${file}" > "${file}.tmp" && mv -f "${file}.tmp" "${file}"
         fi
 
@@ -13243,8 +13271,10 @@ manageReality() {
         if [[ "${coreInstallType}" == "1" && -f "${configPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
             local file="${configPath}08_VLESS_vision_gRPC_inbounds.json"
             jq --arg sni "${newSni}" --arg target "${target}" \
-                '.inbounds[0].streamSettings.realitySettings.serverNames = [$sni] |
-                 .inbounds[0].streamSettings.realitySettings.target = $target' \
+                '.inbounds |= map(if .streamSettings.realitySettings then
+                    .streamSettings.realitySettings.serverNames = [$sni] |
+                    .streamSettings.realitySettings.target = $target
+                  else . end)' \
                 "${file}" > "${file}.tmp" && mv -f "${file}.tmp" "${file}"
         fi
 
@@ -13252,13 +13282,15 @@ manageReality() {
         if [[ "${coreInstallType}" == "1" && -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
             local file="${configPath}12_VLESS_XHTTP_inbounds.json"
             jq --arg sni "${newSni}" --arg target "${target}" \
-                '(if .inbounds[0].streamSettings.realitySettings then
-                    .inbounds[0].streamSettings.realitySettings.serverNames = [$sni] |
-                    .inbounds[0].streamSettings.realitySettings.target = $target
-                  else . end) |
-                 (if .inbounds[0].streamSettings.xhttpSettings then
-                    .inbounds[0].streamSettings.xhttpSettings.host = $sni
-                  else . end)' \
+                '.inbounds |= map(
+                   (if .streamSettings.realitySettings then
+                      .streamSettings.realitySettings.serverNames = [$sni] |
+                      .streamSettings.realitySettings.target = $target
+                    else . end) |
+                   (if .streamSettings.xhttpSettings then
+                      .streamSettings.xhttpSettings.host = $sni
+                    else . end)
+                 )' \
                 "${file}" > "${file}.tmp" && mv -f "${file}.tmp" "${file}"
         fi
 
@@ -13266,9 +13298,11 @@ manageReality() {
         if [[ -f "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" ]]; then
             local file="${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json"
             jq --arg sni "${newSni}" --argjson port "${newTargetPort}" \
-                '.inbounds[0].tls.server_name = $sni |
-                 .inbounds[0].tls.reality.handshake.server = $sni |
-                 .inbounds[0].tls.reality.handshake.server_port = $port' \
+                '.inbounds |= map(if .tls.reality then
+                    .tls.server_name = $sni |
+                    .tls.reality.handshake.server = $sni |
+                    .tls.reality.handshake.server_port = $port
+                  else . end)' \
                 "${file}" > "${file}.tmp" && mv -f "${file}.tmp" "${file}"
         fi
 
@@ -13276,9 +13310,11 @@ manageReality() {
         if [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
             local file="${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json"
             jq --arg sni "${newSni}" --argjson port "${newTargetPort}" \
-                '.inbounds[0].tls.server_name = $sni |
-                 .inbounds[0].tls.reality.handshake.server = $sni |
-                 .inbounds[0].tls.reality.handshake.server_port = $port' \
+                '.inbounds |= map(if .tls.reality then
+                    .tls.server_name = $sni |
+                    .tls.reality.handshake.server = $sni |
+                    .tls.reality.handshake.server_port = $port
+                  else . end)' \
                 "${file}" > "${file}.tmp" && mv -f "${file}.tmp" "${file}"
         fi
 
