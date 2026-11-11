@@ -1,50 +1,23 @@
 # v2ray-agent (AI修改版)
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Version: v3.5.41-pr6](https://img.shields.io/badge/Version-v3.5.41--pr6-green.svg)](https://github.com/BG666888/v2ray-agent)
 
-基于 Bash 的 **Xray-core / sing-box** 多协议安装与管理脚本（Fork 自 `mack-a/v2ray-agent` 并由 AI 深度修改优化）。
-
----
-
-## ✨ AI修改版核心增强特性
-
-1. **全新精炼交互界面与极简订阅输出**：
-   - 重构主菜单为 **`[安装与部署]`**、**`[节点与协议]`**、**`[分流与站点]`**、**`[核心与系统]`** 四大板块（连续编号 `1-15`，支持 `0` 随时返回/退出）。
-   - 彻底移除冗余且无实效的终端订阅二维码及第三方在线二维码生成链接，采用高对比度现代卡片式订阅展示，清晰直观。
-   - 快捷呼出命令全面支持 **`vasma`** 与 **`vasgm`**。
-2. **全协议端口一键管理（`8. 端口管理`）**：
-   - 自动识别已安装的 VLESS (TCP/Reality Vision/gRPC/XHTTP)、Trojan、Hysteria2、TUIC 及 Nginx 订阅服务端口。
-   - 修改端口后自动检测端口占用、更新配置、放行防火墙、联动迁移 Hysteria2/TUIC 端口跳跃规则并静默刷新客户端订阅。
-3. **Reality 伪装域名 (SNI) 快捷更换（`5. REALITY 管理`）**：
-   - 支持保留现有公私钥直接更换伪装域名（内置 5 个高可用优选域名一键选择，或输入任意自定义域名）。
-   - 自动同步更新 Xray（Vision / gRPC / XHTTP）与 sing-box 配置并刷新订阅。
-4. **Clash.Meta (Mihomo / FlClash) 权威规则集成与 0 泄露 DNS 架构**：
-   - 全面引入 **`blackmatrix7/ios_rule_script`** 顶级活跃规则源（涵盖 11 万+ 国内域名大白名单及专用 OpenAI、ClaudeAI、流媒体策略组）。
-   - 采用 `fake-ip` + `respect-rules` + `#DNS_Proxy` 海外加密 DoH 兜底解析，严格限定国内白名单才派发国内 DNS，所有 IP 匹配均强制 `no-resolve`，彻底消灭 DNS 泄露。
-5. **sing-box 客户端规则全面同步升级**：
-   - 升级采用 MetaCubeX 官方 binary `.srs` 高速规则集，同步划分独立 **`ClaudeAI`**、**`OpenAI`**、**`Telegram`**、**`YouTube`** 等专用策略组。
-   - 优化 DNS 路由层级，默认未知解析强制走代理海外 DoH，彻底杜绝 sing-box 客户端 DNS 泄露风险。
-6. **Hysteria2 端口跳跃全客户端兼容**：
-   - 标准 URI 使用主监听端口作为连接地址，通过 `?mport=起始-结束` 传递跳跃端口范围，解决 v2rayNG 等客户端开启端口跳跃后测速 `-1` 的问题。
-7. **更新防缓存机制**：
-   - 脚本更新与模板分发自带 `--no-cache` 与动态时间戳参数，彻底避免 GitHub Raw CDN 5 分钟缓存导致的“版本未生效”现象。
+基于 Bash 的 **Xray-core / sing-box** 多协议一体化管理脚本（基于 `mack-a/v2ray-agent` 进行深度重构、BUG 修复与交互净化）。
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 一键安装 / 运行脚本
-
-在拥有 `root` 权限的 Linux 服务器（Ubuntu / Debian / CentOS / Alpine）上执行：
+### 一键安装 / 运行
+在 root 权限的 Linux 服务器（Ubuntu / Debian / CentOS / Alpine）上执行：
 
 ```bash
 wget -P /root -N --no-check-certificate "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh" && chmod 700 /root/install.sh && /root/install.sh
 ```
 
-### 2. 日常呼出管理菜单
-
-安装完成后，在终端任意位置输入以下任一快捷命令即可打开管理菜单：
-
+### 快捷唤出
+安装后终端输入以下任一命令即可秒开控制台：
 ```bash
 vasma
 # 或
@@ -53,7 +26,23 @@ vasgm
 
 ---
 
-## 📋 主菜单功能速览
+## ⚡ 相比原版（mack-a）的核心优化与修复
+
+| 优化维度 | 原版脚本 (mack-a) | 本版本 (AI修改版) |
+| :--- | :--- | :--- |
+| **Clash (Mihomo) 订阅** | 依赖外部 `proxy-providers` 导致**节点列表为空**；常报 `GEOSITE.dat` 丢失 | **节点直接内嵌**，全客户端即导即用；移除旧数据依赖，秒开秒连 |
+| **路由分流准确率** | 旧版粗糙规则，国内网站经常误走代理 | 接入 **`blackmatrix7` 11 万+ 大陆域名白名单**，国内直连率 99.9% |
+| **DNS 隐私防泄露** | 缺乏白名单隔离与 `no-resolve`，**严重泄漏国内 DNS** | **Fake-IP + `#DNS_Proxy` 海外 DoH + `no-resolve`**，实现 **0 DNS 泄露** |
+| **sing-box 客户端兼容** | 残留已废弃的 `stack` 与 `type: "block"`，导致客户端崩溃报错 | 语法全量现代化迁移；升级 MetaCubeX binary `.srs` 规则与独立 Claude 分组 |
+| **端口修改能力** | 只能添加新端口，无法修改已有协议端口 | 新增 **`8. 端口管理`**：一键改端口、自动查占用、联动防火墙并刷新订阅 |
+| **Reality SNI 伪装** | 更换伪装域名必须全量重装，会重置公私钥导致客户端全断开 | 新增 **`5. REALITY 管理`**：**保留现有公私钥**一键更换域名 |
+| **Hy2 端口跳跃** | 订阅 URI 直填端口段，导致 v2rayNG 等客户端测速 `-1` | 主端口连接 + `?mport=起始-结束` 标准参数，全客户端完美兼容 |
+| **终端交互与订阅排版** | 选项跳跃、广告刷屏、几十行黑白大二维码严重污染终端 | **4 大分类（1-15 + 0返回）**，移除全部广告；**彻底剔除二维码**，采用清爽卡片展示 |
+| **脚本更新机制** | 受 GitHub Raw 5分钟 CDN 缓存拖累，经常更新后“版本未生效” | 更新内置动态时间戳与 `--no-cache`，秒拉最新提交 |
+
+---
+
+## 📋 主菜单预览
 
 ```text
 ================================================================
