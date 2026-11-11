@@ -12261,9 +12261,10 @@ clashMetaConfig() {
     local id=$2
     local publishPath=${3:-/etc/v2ray-agent/subscribe}
     cat <<EOF >"${publishPath}/clashMetaProfiles/${id}"
-log-level: debug
+log-level: info
 mode: rule
-ipv6: true
+ipv6: false
+geodata-mode: false
 mixed-port: 7890
 allow-lan: true
 bind-address: "*"
@@ -12272,13 +12273,6 @@ lan-allowed-ips:
   - ::/0
 find-process-mode: strict
 external-controller: 0.0.0.0:9090
-
-geox-url:
-  geoip: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
-  geosite: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
-  mmdb: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb"
-geo-auto-update: true
-geo-update-interval: 24
 
 external-controller-cors:
   allow-private-network: true
@@ -12296,8 +12290,7 @@ sniffer:
     TLS:
       ports: [ 443 ]
     HTTP:
-      ports: [80]
-
+      ports: [ 80 ]
 
 dns:
   enable: true
@@ -12324,15 +12317,44 @@ dns:
     - https://223.5.5.5/dns-query
     - https://doh.pub/dns-query
   nameserver:
-    - https://223.5.5.5/dns-query
-    - https://doh.pub/dns-query
+    - https://1.1.1.1/dns-query#DNS_Proxy
+    - https://8.8.8.8/dns-query#DNS_Proxy
   nameserver-policy:
-    "geosite:cn,private":
+    '+.cn':
       - https://223.5.5.5/dns-query
       - https://doh.pub/dns-query
-    "geosite:geolocation-!cn":
-      - https://1.1.1.1/dns-query#DNS_Proxy
-      - https://8.8.8.8/dns-query#DNS_Proxy
+    '+.baidu.com':
+      - https://223.5.5.5/dns-query
+    '+.qq.com':
+      - https://doh.pub/dns-query
+    '+.taobao.com':
+      - https://223.5.5.5/dns-query
+    '+.tmall.com':
+      - https://223.5.5.5/dns-query
+    '+.alicdn.com':
+      - https://223.5.5.5/dns-query
+    '+.aliyun.com':
+      - https://223.5.5.5/dns-query
+    '+.jd.com':
+      - https://doh.pub/dns-query
+    '+.bilibili.com':
+      - https://doh.pub/dns-query
+    '+.hdslb.com':
+      - https://doh.pub/dns-query
+    '+.163.com':
+      - https://223.5.5.5/dns-query
+    '+.126.net':
+      - https://223.5.5.5/dns-query
+    '+.douyin.com':
+      - https://223.5.5.5/dns-query
+    '+.weibo.com':
+      - https://223.5.5.5/dns-query
+    '+.zhihu.com':
+      - https://223.5.5.5/dns-query
+    '*.lan':
+      - 223.5.5.5
+    '*.local':
+      - 223.5.5.5
 
 proxy-providers:
   ${subscribeSalt}_provider:
@@ -12355,7 +12377,7 @@ proxy-groups:
   - name: 自动选择
     type: url-test
     url: https://cp.cloudflare.com/generate_204
-    interval: 36000
+    interval: 300
     tolerance: 50
     use:
       - ${subscribeSalt}_provider
@@ -12441,7 +12463,6 @@ proxy-groups:
       - 手动切换
       - 自动选择
 
-
   - name: OpenAI
     type: select
     use:
@@ -12493,47 +12514,154 @@ proxy-groups:
     use:
       - ${subscribeSalt}_provider
     proxies:
-      - DIRECT
+      - 全球代理
       - 手动切换
       - 自动选择
+      - DIRECT
 
 rules:
-  # 局域网与私有网络直连（最高优先级，no-resolve 防止反向 DNS 解析泄露）
-  - GEOIP,private,本地直连,no-resolve
-  - GEOIP,lan,本地直连,no-resolve
-  - GEOSITE,private,本地直连
+  # 1. 局域网与私有网络直连（零外部依赖，no-resolve 防止反向 DNS 解析泄露）
+  - DOMAIN-SUFFIX,local,本地直连
+  - DOMAIN-SUFFIX,lan,本地直连
+  - IP-CIDR,127.0.0.0/8,本地直连,no-resolve
+  - IP-CIDR,10.0.0.0/8,本地直连,no-resolve
+  - IP-CIDR,172.16.0.0/12,本地直连,no-resolve
+  - IP-CIDR,192.168.0.0/16,本地直连,no-resolve
+  - IP-CIDR,100.64.0.0/10,本地直连,no-resolve
+  - IP-CIDR6,::1/128,本地直连,no-resolve
+  - IP-CIDR6,fc00::/7,本地直连,no-resolve
+  - IP-CIDR6,fe80::/10,本地直连,no-resolve
 
-  # 广告拦截（修复之前漏掉拦截的 Bug）
-  - GEOSITE,category-ads-all,REJECT
+  # 2. 常见广告域名拦截
+  - DOMAIN-KEYWORD,adservice,REJECT
+  - DOMAIN-SUFFIX,googlesyndication.com,REJECT
+  - DOMAIN-SUFFIX,googleadservices.com,REJECT
+  - DOMAIN-SUFFIX,doubleclick.net,REJECT
+  - DOMAIN-SUFFIX,adnxs.com,REJECT
+  - DOMAIN-SUFFIX,adsrvr.org,REJECT
 
-  # 常见 AI 独立分流
-  - GEOSITE,openai,OpenAI
-  - GEOSITE,claude,ClaudeAI
-  - GEOSITE,anthropic,ClaudeAI
-  - GEOSITE,bing,Bing
+  # 3. AI 平台精准分流
+  - DOMAIN-SUFFIX,openai.com,OpenAI
+  - DOMAIN-SUFFIX,chatgpt.com,OpenAI
+  - DOMAIN-SUFFIX,oaistatic.com,OpenAI
+  - DOMAIN-SUFFIX,oaiusercontent.com,OpenAI
+  - DOMAIN-SUFFIX,sora.com,OpenAI
+  - DOMAIN-KEYWORD,openai,OpenAI
+  - DOMAIN-SUFFIX,claude.ai,ClaudeAI
+  - DOMAIN-SUFFIX,claude.com,ClaudeAI
+  - DOMAIN-SUFFIX,anthropic.com,ClaudeAI
+  - DOMAIN-SUFFIX,claudeusercontent.com,ClaudeAI
+  - DOMAIN-SUFFIX,bing.com,Bing
+  - DOMAIN-SUFFIX,copilot.microsoft.com,Bing
 
-  # 常见国际流媒体与社交服务
-  - GEOSITE,youtube,YouTube
-  - GEOSITE,google,Google
-  - GEOSITE,github,GitHub
-  - GEOSITE,telegram,Telegram
-  - GEOSITE,netflix,Netflix
-  - GEOSITE,spotify,Spotify
-  - GEOSITE,hbo,HBO
-  - GEOSITE,disney,Disney
+  # 4. YouTube & Google
+  - DOMAIN-SUFFIX,youtube.com,YouTube
+  - DOMAIN-SUFFIX,youtu.be,YouTube
+  - DOMAIN-SUFFIX,ytimg.com,YouTube
+  - DOMAIN-SUFFIX,googlevideo.com,YouTube
+  - DOMAIN-SUFFIX,youtubei.googleapis.com,YouTube
+  - DOMAIN-SUFFIX,gemini.google.com,Google
+  - DOMAIN-SUFFIX,deepmind.com,Google
+  - DOMAIN-SUFFIX,google.com,Google
+  - DOMAIN-SUFFIX,google.com.hk,Google
+  - DOMAIN-SUFFIX,googleapis.com,Google
+  - DOMAIN-SUFFIX,gstatic.com,Google
+  - DOMAIN-SUFFIX,googleusercontent.com,Google
+  - DOMAIN-SUFFIX,gmail.com,Google
+  - DOMAIN-KEYWORD,google,Google
 
-  # GFW 列表与全量海外加速
-  - GEOSITE,gfw,全球代理
-  - GEOSITE,geolocation-!cn,全球代理
+  # 5. GitHub & 开发者服务
+  - DOMAIN-SUFFIX,github.com,GitHub
+  - DOMAIN-SUFFIX,githubusercontent.com,GitHub
+  - DOMAIN-SUFFIX,githubassets.com,GitHub
+  - DOMAIN-SUFFIX,github.io,GitHub
+  - DOMAIN-SUFFIX,huggingface.co,全球代理
+  - DOMAIN-SUFFIX,docker.com,全球代理
+  - DOMAIN-SUFFIX,docker.io,全球代理
 
-  # 国内媒体与大陆直连（no-resolve 防止逆向解析泄露）
-  - GEOSITE,bilibili,国内媒体
-  - GEOSITE,iqiyi,国内媒体
-  - GEOSITE,tencent-video,国内媒体
-  - GEOSITE,cn,本地直连
-  - GEOIP,cn,本地直连,no-resolve
+  # 6. Telegram (含官方数据中心 IP 段 no-resolve 防泄露)
+  - DOMAIN-SUFFIX,t.me,Telegram
+  - DOMAIN-SUFFIX,tdesktop.com,Telegram
+  - DOMAIN-SUFFIX,telegra.ph,Telegram
+  - DOMAIN-SUFFIX,telegram.me,Telegram
+  - DOMAIN-SUFFIX,telegram.org,Telegram
+  - DOMAIN-SUFFIX,telesco.pe,Telegram
+  - IP-CIDR,91.108.4.0/22,Telegram,no-resolve
+  - IP-CIDR,91.108.8.0/21,Telegram,no-resolve
+  - IP-CIDR,91.108.16.0/21,Telegram,no-resolve
+  - IP-CIDR,91.108.56.0/22,Telegram,no-resolve
+  - IP-CIDR,149.154.160.0/20,Telegram,no-resolve
+  - IP-CIDR6,2001:67c:4e8::/48,Telegram,no-resolve
+  - IP-CIDR6,2001:b28:f23d::/48,Telegram,no-resolve
+  - IP-CIDR6,2001:b28:f23f::/48,Telegram,no-resolve
 
-  # 最终兜底走漏网之鱼
+  # 7. 国际流媒体 (Netflix / Spotify / HBO / Disney)
+  - DOMAIN-SUFFIX,netflix.com,Netflix
+  - DOMAIN-SUFFIX,netflix.net,Netflix
+  - DOMAIN-SUFFIX,nflxext.com,Netflix
+  - DOMAIN-SUFFIX,nflximg.com,Netflix
+  - DOMAIN-SUFFIX,nflximg.net,Netflix
+  - DOMAIN-SUFFIX,nflxso.net,Netflix
+  - DOMAIN-SUFFIX,nflxvideo.net,Netflix
+  - DOMAIN-SUFFIX,spotify.com,Spotify
+  - DOMAIN-SUFFIX,scdn.co,Spotify
+  - DOMAIN-SUFFIX,spoti.fi,Spotify
+  - DOMAIN-KEYWORD,spotify,Spotify
+  - DOMAIN-SUFFIX,hbo.com,HBO
+  - DOMAIN-SUFFIX,hbogo.com,HBO
+  - DOMAIN-SUFFIX,hbomax.com,HBO
+  - DOMAIN-SUFFIX,max.com,HBO
+  - DOMAIN-SUFFIX,disney.com,Disney
+  - DOMAIN-SUFFIX,disneyplus.com,Disney
+  - DOMAIN-SUFFIX,bamgrid.com,Disney
+  - DOMAIN-SUFFIX,dssott.com,Disney
+
+  # 8. 常见海外社交与平台
+  - DOMAIN-SUFFIX,x.com,全球代理
+  - DOMAIN-SUFFIX,twitter.com,全球代理
+  - DOMAIN-SUFFIX,twimg.com,全球代理
+  - DOMAIN-SUFFIX,facebook.com,全球代理
+  - DOMAIN-SUFFIX,instagram.com,全球代理
+  - DOMAIN-SUFFIX,whatsapp.com,全球代理
+  - DOMAIN-SUFFIX,discord.com,全球代理
+  - DOMAIN-SUFFIX,discordapp.com,全球代理
+  - DOMAIN-SUFFIX,reddit.com,全球代理
+  - DOMAIN-SUFFIX,wikipedia.org,全球代理
+  - DOMAIN-SUFFIX,twitch.tv,全球代理
+  - DOMAIN-SUFFIX,tiktok.com,全球代理
+  - DOMAIN-SUFFIX,pixiv.net,全球代理
+
+  # 9. 国内媒体与大陆常见直连
+  - DOMAIN-SUFFIX,bilibili.com,国内媒体
+  - DOMAIN-SUFFIX,bilivideo.com,国内媒体
+  - DOMAIN-SUFFIX,hdslb.com,国内媒体
+  - DOMAIN-SUFFIX,iqiyi.com,国内媒体
+  - DOMAIN-SUFFIX,qq.com,本地直连
+  - DOMAIN-SUFFIX,wechat.com,本地直连
+  - DOMAIN-SUFFIX,taobao.com,本地直连
+  - DOMAIN-SUFFIX,tmall.com,本地直连
+  - DOMAIN-SUFFIX,alicdn.com,本地直连
+  - DOMAIN-SUFFIX,aliyun.com,本地直连
+  - DOMAIN-SUFFIX,alipay.com,本地直连
+  - DOMAIN-SUFFIX,jd.com,本地直连
+  - DOMAIN-SUFFIX,360buyimg.com,本地直连
+  - DOMAIN-SUFFIX,baidu.com,本地直连
+  - DOMAIN-SUFFIX,bdstatic.com,本地直连
+  - DOMAIN-SUFFIX,163.com,本地直连
+  - DOMAIN-SUFFIX,126.net,本地直连
+  - DOMAIN-SUFFIX,douyin.com,本地直连
+  - DOMAIN-SUFFIX,bytedance.com,本地直连
+  - DOMAIN-SUFFIX,xiaohongshu.com,本地直连
+  - DOMAIN-SUFFIX,weibo.com,本地直连
+  - DOMAIN-SUFFIX,zhihu.com,本地直连
+  - DOMAIN-SUFFIX,meituan.com,本地直连
+  - DOMAIN-SUFFIX,mi.com,本地直连
+  - DOMAIN-SUFFIX,xiaomi.com,本地直连
+  - DOMAIN-SUFFIX,huawei.com,本地直连
+  - DOMAIN-SUFFIX,cn,本地直连
+  - GEOIP,CN,本地直连,no-resolve
+
+  # 10. 最终兜底
   - MATCH,漏网之鱼
 EOF
 
