@@ -12270,6 +12270,7 @@ clashMetaConfig() {
 log-level: info
 mode: rule
 ipv6: false
+geodata-mode: false
 mixed-port: 7890
 allow-lan: true
 bind-address: "*"
@@ -12278,13 +12279,6 @@ lan-allowed-ips:
   - ::/0
 find-process-mode: strict
 external-controller: 0.0.0.0:9090
-
-geox-url:
-  geoip: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
-  geosite: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
-  mmdb: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb"
-geo-auto-update: true
-geo-update-interval: 24
 
 external-controller-cors:
   allow-private-network: true
@@ -12332,10 +12326,10 @@ dns:
     - https://223.5.5.5/dns-query
     - https://doh.pub/dns-query
   nameserver-policy:
-    "geosite:cn,private":
+    "rule-set:ChinaMaxDomain,Lan":
       - https://223.5.5.5/dns-query
       - https://doh.pub/dns-query
-    "geosite:gfw,geolocation-!cn":
+    "rule-set:GlobalDomain,OpenAI,ClaudeAI,Bing,YouTube,Google,GitHub,Telegram,Netflix,Spotify,HBO,Disney":
       - https://1.1.1.1/dns-query#DNS_Proxy
       - https://8.8.8.8/dns-query#DNS_Proxy
 
@@ -12471,61 +12465,144 @@ ${proxyNamesList}
       - 自动选择
       - DIRECT
 
+rule-providers:
+  Lan:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Lan/Lan.yaml
+    path: ./ruleset/lan.yaml
+  AdvertisingLite:
+    type: http
+    behavior: domain
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/AdvertisingLite/AdvertisingLite_Domain.yaml
+    path: ./ruleset/advertising_lite.yaml
+  OpenAI:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.yaml
+    path: ./ruleset/openai.yaml
+  ClaudeAI:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.yaml
+    path: ./ruleset/claudeai.yaml
+  Bing:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Bing/Bing.yaml
+    path: ./ruleset/bing.yaml
+  YouTube:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/YouTube/YouTube.yaml
+    path: ./ruleset/youtube.yaml
+  Google:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Google/Google.yaml
+    path: ./ruleset/google.yaml
+  GitHub:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/GitHub/GitHub.yaml
+    path: ./ruleset/github.yaml
+  Telegram:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Telegram/Telegram.yaml
+    path: ./ruleset/telegram.yaml
+  Netflix:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Netflix/Netflix.yaml
+    path: ./ruleset/netflix.yaml
+  Spotify:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Spotify/Spotify.yaml
+    path: ./ruleset/spotify.yaml
+  HBO:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/HBO/HBO.yaml
+    path: ./ruleset/hbo.yaml
+  Disney:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Disney/Disney.yaml
+    path: ./ruleset/disney.yaml
+  ChinaMedia:
+    type: http
+    behavior: classical
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMedia/ChinaMedia.yaml
+    path: ./ruleset/chinamedia.yaml
+  GlobalDomain:
+    type: http
+    behavior: domain
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Global/Global_Domain.yaml
+    path: ./ruleset/global_domain.yaml
+  ChinaMaxDomain:
+    type: http
+    behavior: domain
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_Domain.yaml
+    path: ./ruleset/chinamax_domain.yaml
+  ChinaMaxIPNoIPv6:
+    type: http
+    behavior: ipcidr
+    interval: 86400
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_IP_No_IPv6.yaml
+    path: ./ruleset/chinamax_ip.yaml
+
 rules:
   # 1. 局域网与私有网络直连（最高优先级，no-resolve 防止反向 DNS 解析泄露）
-  - GEOIP,private,本地直连,no-resolve
-  - GEOSITE,private,本地直连
+  - RULE-SET,Lan,本地直连,no-resolve
 
-  # 2. 广告拦截
-  - GEOSITE,category-ads-all,REJECT
+  # 2. 广告拦截（blackmatrix7 轻量广告域名规则）
+  - RULE-SET,AdvertisingLite,REJECT
 
-  # 3. AI 平台精准分流（Claude 使用原生域名匹配，避免旧版 GEOSITE.dat 无 claude 词条报错）
-  - DOMAIN-SUFFIX,claude.ai,ClaudeAI
-  - DOMAIN-SUFFIX,claude.com,ClaudeAI
-  - DOMAIN-SUFFIX,anthropic.com,ClaudeAI
-  - DOMAIN-SUFFIX,claudeusercontent.com,ClaudeAI
-  - DOMAIN-SUFFIX,chatgpt.com,OpenAI
-  - DOMAIN-SUFFIX,openai.com,OpenAI
-  - DOMAIN-SUFFIX,oaistatic.com,OpenAI
-  - DOMAIN-SUFFIX,oaiusercontent.com,OpenAI
-  - DOMAIN-SUFFIX,sora.com,OpenAI
-  - GEOSITE,openai,OpenAI
-  - GEOSITE,bing,Bing
+  # 3. AI 平台精准分流（blackmatrix7 专项规则）
+  - RULE-SET,OpenAI,OpenAI,no-resolve
+  - RULE-SET,ClaudeAI,ClaudeAI,no-resolve
+  - RULE-SET,Bing,Bing,no-resolve
 
-  # 4. 国际流媒体与常用海外服务
-  - GEOSITE,youtube,YouTube
-  - GEOSITE,google,Google
-  - GEOSITE,github,GitHub
-  - GEOSITE,telegram,Telegram
-  - IP-CIDR,91.108.4.0/22,Telegram,no-resolve
-  - IP-CIDR,91.108.8.0/21,Telegram,no-resolve
-  - IP-CIDR,91.108.16.0/21,Telegram,no-resolve
-  - IP-CIDR,91.108.56.0/22,Telegram,no-resolve
-  - IP-CIDR,149.154.160.0/20,Telegram,no-resolve
-  - IP-CIDR6,2001:67c:4e8::/48,Telegram,no-resolve
-  - IP-CIDR6,2001:b28:f23d::/48,Telegram,no-resolve
-  - IP-CIDR6,2001:b28:f23f::/48,Telegram,no-resolve
-  - GEOSITE,netflix,Netflix
-  - GEOSITE,spotify,Spotify
-  - GEOSITE,hbo,HBO
-  - GEOSITE,disney,Disney
+  # 4. 国际流媒体与常用海外服务（blackmatrix7 专项规则）
+  - RULE-SET,YouTube,YouTube,no-resolve
+  - RULE-SET,Google,Google,no-resolve
+  - RULE-SET,GitHub,GitHub,no-resolve
+  - RULE-SET,Telegram,Telegram,no-resolve
+  - RULE-SET,Netflix,Netflix,no-resolve
+  - RULE-SET,Spotify,Spotify,no-resolve
+  - RULE-SET,HBO,HBO,no-resolve
+  - RULE-SET,Disney,Disney,no-resolve
 
-  # 5. GFW 列表优先走代理
-  - GEOSITE,gfw,全球代理
+  # 5. 国内媒体与大陆全量域名优先直连（置于 GlobalDomain 之前，确保国内网站 100% 优先直连）
+  - RULE-SET,ChinaMedia,国内媒体,no-resolve
+  - RULE-SET,ChinaMaxDomain,本地直连
 
-  # 6. 国内媒体与 10万+ 大陆域名优先直连（置于 geolocation-!cn 之前，防止国内网站误走代理）
-  - GEOSITE,bilibili,国内媒体
-  - GEOSITE,iqiyi,国内媒体
-  - DOMAIN-SUFFIX,v.qq.com,国内媒体
-  - GEOSITE,cn,本地直连
+  # 6. 全球海外加速域名
+  - RULE-SET,GlobalDomain,全球代理
 
-  # 7. 非中国大陆域名走代理
-  - GEOSITE,geolocation-!cn,全球代理
+  # 7. 大陆 IP 段与 GEOIP 兜底直连
+  - RULE-SET,ChinaMaxIPNoIPv6,本地直连,no-resolve
+  - GEOIP,CN,本地直连
 
-  # 8. 大陆 IP 兜底直连（不加 no-resolve，使未收录的新国内域名通过国内 DNS 解析识别为 CN 直连）
-  - GEOIP,cn,本地直连
-
-  # 9. 最终兜底
+  # 8. 最终兜底
   - MATCH,漏网之鱼
 EOF
 
@@ -13520,7 +13597,7 @@ siteSecurityMenu() {
 menu() {
     cd "$HOME" || exit
     echoContent red "\n================================================================"
-    echoContent green "  当前版本：v3.5.41-pr1"
+    echoContent green "  当前版本：v3.5.41-pr2"
     echoContent skyBlue "  项目仓库：BG666888/v2ray-agent  |  快捷命令：vasma\c"
     showInstallStatus
     checkWgetShowProgress
