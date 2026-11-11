@@ -12260,6 +12260,12 @@ clashMetaConfig() {
     local url=$1
     local id=$2
     local publishPath=${3:-/etc/v2ray-agent/subscribe}
+    local proxiesBlock="proxies: []"
+    local proxyNamesList=""
+    if [[ -s "${publishPath}/clashMeta/${id}" ]]; then
+        proxiesBlock=$(cat "${publishPath}/clashMeta/${id}")
+        proxyNamesList=$(grep -E '^[[:space:]]*-[[:space:]]*name:' "${publishPath}/clashMeta/${id}" | sed -E 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/      - /')
+    fi
     cat <<EOF >"${publishPath}/clashMetaProfiles/${id}"
 log-level: info
 mode: rule
@@ -12356,163 +12362,132 @@ dns:
     '*.local':
       - 223.5.5.5
 
-proxy-providers:
-  ${subscribeSalt}_provider:
-    type: http
-    path: ./${subscribeSalt}_provider.yaml
-    url: ${url}
-    interval: 3600
-    proxy: DIRECT
-    health-check:
-      enable: true
-      url: https://cp.cloudflare.com/generate_204
-      interval: 300
+${proxiesBlock}
 
 proxy-groups:
   - name: 手动切换
     type: select
-    use:
-      - ${subscribeSalt}_provider
-    proxies: null
+    proxies:
+${proxyNamesList}
   - name: 自动选择
     type: url-test
     url: https://cp.cloudflare.com/generate_204
     interval: 300
     tolerance: 50
-    use:
-      - ${subscribeSalt}_provider
-    proxies: null
+    proxies:
+${proxyNamesList}
 
   - name: 全球代理
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
+${proxyNamesList}
 
   - name: 流媒体
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
       - DIRECT
+${proxyNamesList}
   - name: DNS_Proxy
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 自动选择
       - 手动切换
       - DIRECT
+${proxyNamesList}
 
   - name: Telegram
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
+${proxyNamesList}
   - name: Google
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
       - DIRECT
+${proxyNamesList}
   - name: YouTube
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
+${proxyNamesList}
   - name: Netflix
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 流媒体
       - 手动切换
       - 自动选择
+${proxyNamesList}
   - name: Spotify
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 流媒体
       - 手动切换
       - 自动选择
       - DIRECT
+${proxyNamesList}
   - name: HBO
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 流媒体
       - 手动切换
       - 自动选择
+${proxyNamesList}
   - name: Bing
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
+${proxyNamesList}
 
   - name: OpenAI
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
+${proxyNamesList}
 
   - name: ClaudeAI
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
+${proxyNamesList}
 
   - name: Disney
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 流媒体
       - 手动切换
       - 自动选择
+${proxyNamesList}
   - name: GitHub
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 手动切换
       - 自动选择
       - DIRECT
+${proxyNamesList}
 
   - name: 国内媒体
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - DIRECT
+      - 手动切换
   - name: 本地直连
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - DIRECT
       - 自动选择
   - name: 漏网之鱼
     type: select
-    use:
-      - ${subscribeSalt}_provider
     proxies:
       - 全球代理
       - 手动切换
