@@ -249,6 +249,9 @@ initVar() {
     # 安装时选择的core类型
     selectCoreType=
 
+    # 黄金抗封锁三件套预设标志
+    goldenTrioPreset=false
+
     # 默认core版本
     #    v2rayCoreVersion=
 
@@ -718,8 +721,11 @@ readInstallProtocolType() {
     singBoxAnyTLSPort=
     singBoxTuicPort=
     singBoxNaivePort=
+    singBoxVLESSWSPort=
     singBoxVMessWSPort=
+    singBoxVMessHTTPUpgradePort=
     singBoxSocks5Port=
+    xrayVLESSXHTTPTLSPort=
 
     [[ -n "${configPath}" && -d "${configPath}" ]] || return 0
 
@@ -1296,46 +1302,149 @@ readConfigHostPathUUID() {
     fi
 }
 
+# 读取本机 TLS 证书状态（设置 tlsCertDomain / tlsCertRemainingDays / tlsCertSummary）
+getTlsCertStatus() {
+    tlsCertDomain=""
+    tlsCertRemainingDays=""
+    tlsCertSummary="免证书/未配置"
+
+    local checkDomain="${currentHost}"
+    if [[ -z "${checkDomain}" && -n "${tlsDomain}" ]]; then
+        checkDomain="${tlsDomain}"
+    fi
+
+    local certPath=""
+    if [[ -n "${checkDomain}" && -s "/etc/v2ray-agent/tls/${checkDomain}.crt" ]]; then
+        certPath="/etc/v2ray-agent/tls/${checkDomain}.crt"
+    elif [[ -d "/etc/v2ray-agent/tls" ]]; then
+        certPath=$(find /etc/v2ray-agent/tls -maxdepth 1 -type f -name "*.crt" -size +0c 2>/dev/null | head -n 1)
+        if [[ -n "${certPath}" ]]; then
+            checkDomain=$(basename "${certPath}" .crt)
+        fi
+    fi
+
+    if [[ -z "${certPath}" && -n "${checkDomain}" && -s "$HOME/.acme.sh/${checkDomain}_ecc/${checkDomain}.cer" ]]; then
+        certPath="$HOME/.acme.sh/${checkDomain}_ecc/${checkDomain}.cer"
+    fi
+
+    if [[ -z "${certPath}" || ! -s "${certPath}" ]]; then
+        return 1
+    fi
+
+    tlsCertDomain="${checkDomain}"
+    local notAfter expiryTime currentTime remainingSeconds
+    notAfter=$(openssl x509 -in "${certPath}" -noout -enddate 2>/dev/null)
+    notAfter=${notAfter#notAfter=}
+    if [[ -z "${notAfter}" ]]; then
+        tlsCertSummary="解析失败"
+        return 1
+    fi
+    expiryTime=$(date +%s -d "${notAfter}" 2>/dev/null)
+    if [[ -z "${expiryTime}" ]]; then
+        tlsCertSummary="已配置(日期格式不支持)"
+        return 0
+    fi
+    currentTime=$(date +%s)
+    remainingSeconds=$((expiryTime - currentTime))
+    if ((remainingSeconds <= 0)); then
+        tlsCertRemainingDays=0
+        tlsCertSummary="已过期"
+        return 2
+    fi
+    tlsCertRemainingDays=$(((remainingSeconds + 86399) / 86400))
+    if ((tlsCertRemainingDays <= ${sslRenewalThresholdDays:-30})); then
+        tlsCertSummary="剩余 ${tlsCertRemainingDays} 天(即将到期)"
+    else
+        tlsCertSummary="剩余 ${tlsCertRemainingDays} 天(有效)"
+    fi
+    return 0
+}
+
 # 状态展示
 showInstallStatus() {
     if [[ -n "${coreInstallType}" ]]; then
-        if [[ "${coreInstallType}" == 1 ]]; then
-            if [[ -n $(pgrep -f "xray/xray") ]]; then
-                echoContent green "\n  运行核心 : Xray-core [运行中]"
+        local xrayUp=false singBoxUp=false dualCoreInstalled=false
+        [[ -n $(pgrep -f "xray/xray" 2>/dev/null) ]] && xrayUp=true
+        [[ -n $(pgrep -f "sing-box/sing-box" 2>/dev/null) ]] && singBoxUp=true
+        if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" ]] && { [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]] || [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]] || [[ -f "${singBoxConfigPath}20_socks5_inbounds.json" ]]; }; then
+            dualCoreInstalled=true
+        fi
+
+        local coreStatusText="" coreColor="red"
+        if [[ "${coreInstallType}" == "1" ]]; then
+            if [[ "${dualCoreInstalled}" == "true" ]]; then
+                if [[ "${xrayUp}" == "true" && "${singBoxUp}" == "true" ]]; then
+                    coreStatusText="Xray + sing-box [双核运行中]"
+                    coreColor="green"
+                elif [[ "${xrayUp}" == "true" ]]; then
+                    coreStatusText="Xray [运行中] / sing-box [未运行]"
+                    coreColor="yellow"
+                else
+                    coreStatusText="Xray [未运行]"
+                    coreColor="red"
+                fi
             else
-                echoContent red "\n  运行核心 : Xray-core [未运行]"
+                if [[ "${xrayUp}" == "true" ]]; then
+                    coreStatusText="Xray-core [运行中]"
+                    coreColor="green"
+                else
+                    coreStatusText="Xray-core [未运行]"
+                    coreColor="red"
+                fi
             fi
-        elif [[ "${coreInstallType}" == 2 ]]; then
-            if [[ -n $(pgrep -f "sing-box/sing-box") ]]; then
-                echoContent green "\n  运行核心 : sing-box [运行中]"
+        elif [[ "${coreInstallType}" == "2" ]]; then
+            if [[ "${singBoxUp}" == "true" ]]; then
+                coreStatusText="sing-box [运行中]"
+                coreColor="green"
             else
-                echoContent red "\n  运行核心 : sing-box [未运行]"
+                coreStatusText="sing-box [未运行]"
+                coreColor="red"
             fi
         fi
+
+        local nginxStatusText="未启用"
+        if [[ -n $(pgrep -x "nginx" 2>/dev/null || pgrep -f "/nginx" 2>/dev/null) ]]; then
+            nginxStatusText="运行中"
+        elif command -v nginx >/dev/null 2>&1 || [[ -x /usr/sbin/nginx || -x /usr/local/nginx/sbin/nginx ]]; then
+            nginxStatusText="未运行"
+        fi
+
+        getTlsCertStatus >/dev/null 2>&1
+        echoContent "${coreColor}" "  运行核心 : ${coreStatusText}  |  Nginx: ${nginxStatusText}  |  证书: ${tlsCertSummary}"
+
         # 读取协议类型
         readInstallProtocolType
 
         local -a protoList=()
-        if echo "${currentInstallProtocolType}" | grep -q ",0,"; then protoList+=("VLESS+TCP[TLS_Vision]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",1,"; then protoList+=("VLESS+WS[TLS]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",2,"; then protoList+=("Trojan+gRPC[TLS]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",3,"; then protoList+=("VMess+WS[TLS]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",4,"; then protoList+=("Trojan+TCP[TLS]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",5,"; then protoList+=("VLESS+gRPC[TLS]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",6,"; then protoList+=("Hysteria2"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",7,"; then protoList+=("VLESS+Reality[Vision]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",8,"; then protoList+=("VLESS+Reality[gRPC]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",9,"; then protoList+=("TUIC"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",10,"; then protoList+=("Naive"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",11,"; then protoList+=("VMess+HTTPUpgrade[TLS]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",12,"; then protoList+=("VLESS+Reality[XHTTP]"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",13,"; then protoList+=("AnyTLS"); fi
-        if echo "${currentInstallProtocolType}" | grep -q ",14,"; then protoList+=("VLESS+XHTTP[TLS]"); fi
-        if [[ "${currentInstallProtocolType}" == *",20,"* ]]; then protoList+=("SOCKS5[${singBoxSocks5Port}]"); fi
+        local p0="${currentPort}" p4="${currentPort}" p6="${xrayHysteria2Port:-${singBoxHysteria2Port}}" p7="${xrayVLESSRealityPort}"
+        if [[ "${coreInstallType}" == "1" ]]; then
+            [[ -f "${configPath}02_VLESS_TCP_inbounds.json" ]] && p0=$(jq -r '.inbounds[0].port // empty' "${configPath}02_VLESS_TCP_inbounds.json" 2>/dev/null)
+            [[ -f "${configPath}04_trojan_TCP_inbounds.json" ]] && p4=$(jq -r '.inbounds[0].port // empty' "${configPath}04_trojan_TCP_inbounds.json" 2>/dev/null)
+        elif [[ "${coreInstallType}" == "2" ]]; then
+            p0="${singBoxVLESSVisionPort}"
+            p4="${singBoxTrojanPort}"
+            p7="${singBoxVLESSRealityVisionPort}"
+        fi
+
+        if echo "${currentInstallProtocolType}" | grep -q ",0,"; then protoList+=("VLESS+Vision(${p0:-443})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",1,"; then protoList+=("VLESS+WS"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",2,"; then protoList+=("Trojan+gRPC"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",3,"; then protoList+=("VMess+WS"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",4,"; then protoList+=("Trojan+TCP(${p4:-443})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",5,"; then protoList+=("VLESS+gRPC"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",6,"; then protoList+=("Hysteria2(UDP:${p6})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",7,"; then protoList+=("Reality+Vision(${p7})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",8,"; then protoList+=("Reality+gRPC(${singBoxVLESSRealityGRPCPort})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",9,"; then protoList+=("TUIC(UDP:${singBoxTuicPort})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",10,"; then protoList+=("Naive(${singBoxNaivePort})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",11,"; then protoList+=("VMess+HTTPUp(${singBoxVMessHTTPUpgradePort})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",12,"; then protoList+=("Reality+XHTTP(${xrayVLESSRealityXHTTPort})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",13,"; then protoList+=("AnyTLS(${singBoxAnyTLSPort})"); fi
+        if echo "${currentInstallProtocolType}" | grep -q ",14,"; then protoList+=("VLESS+XHTTP+TLS(${xrayVLESSXHTTPTLSPort})"); fi
+        if [[ "${currentInstallProtocolType}" == *",20,"* ]]; then protoList+=("SOCKS5(${singBoxSocks5Port})"); fi
 
         if [[ ${#protoList[@]} -gt 0 ]]; then
-            local joinedProtos=""
-            local p
+            local joinedProtos="" p
             for p in "${protoList[@]}"; do
                 if [[ -z "${joinedProtos}" ]]; then
                     joinedProtos="${p}"
@@ -1343,10 +1452,12 @@ showInstallStatus() {
                     joinedProtos="${joinedProtos} | ${p}"
                 fi
             done
-            echoContent yellow "  已装协议 : ${joinedProtos}\c"
+            echoContent yellow "  已装协议 : ${joinedProtos}"
+        else
+            echoContent yellow "  已装协议 : 暂无"
         fi
     else
-        echoContent yellow "\n  当前状态 : 尚未安装任何代理核心与协议\c"
+        echoContent yellow "  当前状态 : 尚未安装任何代理核心与协议"
     fi
 }
 
@@ -2299,6 +2410,20 @@ acmeInstallSSL() {
 }
 # 自定义端口
 customPortFunction() {
+    if [[ "${goldenTrioPreset}" == "true" ]]; then
+        port=8443
+        if [[ "${port}" == "${xrayVLESSRealityPort}" || "${port}" == "${currentPort}" ]]; then
+            handleXray stop >/dev/null 2>&1
+        fi
+        allowPort "${port}"
+        echoContent yellow "\n ---> [黄金3件套] VLESS+TLS_Vision 自动分配端口: TCP ${port}"
+        if [[ -z "${btDomain}" ]]; then
+            checkDNSIP "${domain}"
+            removeNginxDefaultConf
+            checkPortOpen "${port}" "${domain}" || return 1
+        fi
+        return 0
+    fi
     local historyCustomPortStatus=
     if [[ -n "${customPort}" || -n "${currentPort}" ]]; then
         echo
@@ -3518,6 +3643,13 @@ initSingBoxClients() {
 # 初始化hysteria端口
 initHysteriaPort() {
     readSingBoxConfig
+    if [[ "${goldenTrioPreset}" == "true" ]]; then
+        hysteriaPort=443
+        allowPort "${hysteriaPort}"
+        allowPort "${hysteriaPort}" "udp"
+        echoContent yellow "\n ---> [黄金3件套] Hysteria2 自动分配端口: UDP ${hysteriaPort}"
+        return 0
+    fi
     if [[ -n "${hysteriaPort}" ]]; then
         read -r -p "读取到上次安装时的端口，是否使用上次安装时的端口？[y/n]:" historyHysteriaPortStatus
         if [[ "${historyHysteriaPortStatus}" == "y" ]]; then
@@ -3655,6 +3787,11 @@ readPortHopping() {
         hysteria2PortHopping=
         hysteria2HopInterval=${hoppingInterval:-60}
         [[ -z "${hoppingStart}" ]] || hysteria2PortHopping="${hoppingStart}-${hoppingEnd}"
+    elif [[ "${type}" == tuic ]]; then
+        tuicPortHoppingStart=${hoppingStart}
+        tuicPortHoppingEnd=${hoppingEnd}
+        tuicPortHopping=
+        [[ -z "${hoppingStart}" ]] || tuicPortHopping="${hoppingStart}-${hoppingEnd}"
     fi
 }
 
@@ -5345,7 +5482,13 @@ initSingBoxConfig() {
         echoContent yellow "\n===================== 配置VLESS+Vision =====================\n"
         echoContent skyBlue "\n开始配置VLESS+Vision协议端口"
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVLESSVisionPort}")
+        if [[ "${goldenTrioPreset}" == "true" ]]; then
+            result=(8443)
+            allowPort 8443
+            allowPort 8443 udp
+        else
+            mapfile -t result < <(initSingBoxPort "${singBoxVLESSVisionPort}")
+        fi
         echoContent green "\n ---> VLESS_Vision端口：${result[-1]}"
 
         checkDNSIP "${domain}"
@@ -5465,7 +5608,13 @@ EOF
         initRealityKey
         echoContent skyBlue "\n开始配置VLESS+Reality+Vision协议端口"
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVLESSRealityVisionPort}")
+        if [[ "${goldenTrioPreset}" == "true" ]]; then
+            result=(443)
+            allowPort 443
+            allowPort 443 udp
+        else
+            mapfile -t result < <(initSingBoxPort "${singBoxVLESSRealityVisionPort}")
+        fi
         echoContent green "\n ---> VLESS_Reality_Vision端口：${result[-1]}"
         cat <<EOF >/etc/v2ray-agent/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json
 {
@@ -5549,7 +5698,13 @@ EOF
         echoContent yellow "\n================== 配置 Hysteria2 ==================\n"
         echoContent skyBlue "\n开始配置Hysteria2协议端口"
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxHysteria2Port}")
+        if [[ "${goldenTrioPreset}" == "true" ]]; then
+            result=(443)
+            allowPort 443
+            allowPort 443 udp
+        else
+            mapfile -t result < <(initSingBoxPort "${singBoxHysteria2Port}")
+        fi
         echoContent green "\n ---> Hysteria2端口：${result[-1]}"
         initHysteria2Network
         cat <<EOF >/etc/v2ray-agent/sing-box/conf/config/06_hysteria2_inbounds.json
@@ -6824,6 +6979,481 @@ updateNginxBlog() {
     fi
 }
 
+# 收集已安装协议与端口清单（填充 collectedProtoNames/Files/Ports/Types/Cores/Hops）
+collectInstalledPorts() {
+    collectedProtoNames=()
+    collectedProtoFiles=()
+    collectedProtoPorts=()
+    collectedProtoTypes=()
+    collectedProtoCores=()
+    collectedProtoHops=()
+
+    local pFile="" pPort="" pCore="" hopInfo=""
+
+    # 1. VLESS TCP (TLS / Vision)
+    if echo "${currentInstallProtocolType}" | grep -q ",0,"; then
+        pFile="" pPort="" pCore=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
+            pFile="${configPath}02_VLESS_TCP_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}" 2>/dev/null)
+            pCore="xray"
+        elif [[ -f "${singBoxConfigPath}02_VLESS_TCP_inbounds.json" ]]; then
+            pFile="${singBoxConfigPath}02_VLESS_TCP_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}" 2>/dev/null)
+            pCore="sing-box"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            collectedProtoNames+=("VLESS TCP (TLS_Vision)")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("tcp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("")
+        fi
+    fi
+
+    # 2. Hysteria2
+    if echo "${currentInstallProtocolType}" | grep -q ",6," || [[ -n "${hysteriaPort}" ]]; then
+        pFile="" pPort="" pCore="" hopInfo=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}06_hysteria2_inbounds.json" ]]; then
+            pFile="${configPath}06_hysteria2_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}" 2>/dev/null)
+            pCore="xray"
+        elif [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
+            pFile="${singBoxConfigPath}06_hysteria2_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}" 2>/dev/null)
+            pCore="sing-box"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            readPortHopping "hysteria2" "${pPort}" >/dev/null 2>&1
+            if [[ -n "${hysteria2PortHoppingStart}" ]]; then
+                hopInfo=" (跳跃: ${hysteria2PortHopping})"
+            fi
+            collectedProtoNames+=("Hysteria2 TLS")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("udp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("${hopInfo}")
+        fi
+    fi
+
+    # 3. VLESS Reality (Vision)
+    if echo "${currentInstallProtocolType}" | grep -q ",7,"; then
+        pFile="" pPort="" pCore=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
+            pFile="${configPath}07_VLESS_vision_reality_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}" 2>/dev/null)
+            pCore="xray"
+        elif [[ -f "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" ]]; then
+            pFile="${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}" 2>/dev/null)
+            pCore="sing-box"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            collectedProtoNames+=("VLESS Reality (Vision)")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("tcp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("")
+        fi
+    fi
+
+    # 4. VLESS Reality (gRPC)
+    if echo "${currentInstallProtocolType}" | grep -q ",8,"; then
+        pFile="" pPort="" pCore=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
+            pFile="${configPath}08_VLESS_vision_gRPC_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}" 2>/dev/null)
+            pCore="xray"
+        elif [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
+            pFile="${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}" 2>/dev/null)
+            pCore="sing-box"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            collectedProtoNames+=("VLESS Reality (gRPC)")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("tcp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("")
+        fi
+    fi
+
+    # 4b. VLESS Reality (XHTTP)
+    if echo "${currentInstallProtocolType}" | grep -q ",12,"; then
+        pFile="" pPort="" pCore=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
+            pFile="${configPath}12_VLESS_XHTTP_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}" 2>/dev/null)
+            pCore="xray"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            collectedProtoNames+=("VLESS Reality (XHTTP)")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("tcp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("")
+        fi
+    fi
+
+    # 4c. VLESS XHTTP (TLS)
+    if echo "${currentInstallProtocolType}" | grep -q ",14,"; then
+        pFile="" pPort="" pCore=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}14_VLESS_XHTTP_TLS_inbounds.json" ]]; then
+            pFile="${configPath}14_VLESS_XHTTP_TLS_inbounds.json"
+            pPort=$(jq -r '.inbounds[1].port // empty' "${pFile}" 2>/dev/null)
+            pCore="xray"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            collectedProtoNames+=("VLESS XHTTP (TLS)")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("tcp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("")
+        fi
+    fi
+
+    # 4d. Trojan TCP (TLS)
+    if echo "${currentInstallProtocolType}" | grep -q ",4,"; then
+        pFile="" pPort="" pCore=""
+        if [[ "${coreInstallType}" == "1" && -f "${configPath}04_trojan_TCP_inbounds.json" ]]; then
+            pFile="${configPath}04_trojan_TCP_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}" 2>/dev/null)
+            pCore="xray"
+        elif [[ -f "${singBoxConfigPath}04_trojan_TCP_inbounds.json" ]]; then
+            pFile="${singBoxConfigPath}04_trojan_TCP_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}" 2>/dev/null)
+            pCore="sing-box"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            collectedProtoNames+=("Trojan TCP (TLS)")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("tcp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("")
+        fi
+    fi
+
+    # 5. TUIC
+    if echo "${currentInstallProtocolType}" | grep -q ",9," || [[ -n "${tuicPort}" ]]; then
+        pFile="" pPort="" pCore="" hopInfo=""
+        if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
+            pFile="${singBoxConfigPath}09_tuic_inbounds.json"
+            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}" 2>/dev/null)
+            pCore="sing-box"
+        fi
+        if [[ -n "${pPort}" ]]; then
+            readPortHopping "tuic" "${pPort}" >/dev/null 2>&1
+            if [[ -n "${tuicPortHoppingStart}" ]]; then
+                hopInfo=" (跳跃: ${tuicPortHopping})"
+            fi
+            collectedProtoNames+=("TUIC TLS")
+            collectedProtoFiles+=("${pFile}")
+            collectedProtoPorts+=("${pPort}")
+            collectedProtoTypes+=("udp")
+            collectedProtoCores+=("${pCore}")
+            collectedProtoHops+=("${hopInfo}")
+        fi
+    fi
+
+    # 6. Nginx 订阅端口
+    if [[ -n "${subscribePort}" && -f "${nginxConfigPath}subscribe.conf" ]]; then
+        collectedProtoNames+=("Nginx 订阅服务")
+        collectedProtoFiles+=("${nginxConfigPath}subscribe.conf")
+        collectedProtoPorts+=("${subscribePort}")
+        collectedProtoTypes+=("tcp")
+        collectedProtoCores+=("nginx")
+        collectedProtoHops+=("")
+    fi
+}
+
+# 检查指定协议/端口是否正在本机监听
+checkPortListening() {
+    local proto="$1"
+    local port="$2"
+    [[ -z "${port}" ]] && return 1
+    if command -v ss >/dev/null 2>&1; then
+        if [[ "${proto}" == "udp" ]]; then
+            ss -lnu 2>/dev/null | awk 'NR>1 {print $(NF-1)}' | grep -Eq "(:|\\*)${port}$" && return 0
+        else
+            ss -lnt 2>/dev/null | awk 'NR>1 {print $(NF-1)}' | grep -Eq "(:|\\*)${port}$" && return 0
+        fi
+    elif command -v lsof >/dev/null 2>&1; then
+        if [[ "${proto}" == "udp" ]]; then
+            lsof -iUDP:"${port}" -P -n 2>/dev/null | grep -q . && return 0
+        else
+            lsof -iTCP:"${port}" -sTCP:LISTEN -P -n 2>/dev/null | grep -q . && return 0
+        fi
+    fi
+    return 1
+}
+
+# 读取进程 RSS 内存占用（MB，兼容 BusyBox 与 Procps）
+getProcessRssMb() {
+    local pid="$1"
+    local memKb=""
+    if [[ -r "/proc/${pid}/status" ]]; then
+        memKb=$(awk '/^VmRSS:/ {print $2; exit}' "/proc/${pid}/status" 2>/dev/null)
+    fi
+    if [[ ! "${memKb}" =~ ^[0-9]+$ ]]; then
+        memKb=$(ps -o rss= -p "${pid}" 2>/dev/null | tr -d ' ')
+    fi
+    awk -v k="${memKb:-0}" 'BEGIN {printf "%.1f", k/1024}'
+}
+
+# Reality 伪装域名实时握手探活 (TLSv1.3 + ALPN h2 + 非CF检查)
+checkRealitySniHealth() {
+    local sni="$1"
+    [[ -z "${sni}" ]] && return 0
+
+    local startMs endMs costText=""
+    startMs=$(date +%s%3N 2>/dev/null)
+    [[ ! "${startMs}" =~ ^[0-9]+$ ]] && startMs=""
+
+    local tlsOut=""
+    if command -v timeout >/dev/null 2>&1; then
+        if timeout 1 true >/dev/null 2>&1; then
+            tlsOut=$(timeout 5 openssl s_client -connect "${sni}:443" -servername "${sni}" -alpn h2 -tls1_3 </dev/null 2>/dev/null)
+        elif timeout -t 1 true >/dev/null 2>&1; then
+            tlsOut=$(timeout -t 5 openssl s_client -connect "${sni}:443" -servername "${sni}" -alpn h2 -tls1_3 </dev/null 2>/dev/null)
+        else
+            tlsOut=$(openssl s_client -connect "${sni}:443" -servername "${sni}" -alpn h2 -tls1_3 </dev/null 2>/dev/null)
+        fi
+    else
+        tlsOut=$(openssl s_client -connect "${sni}:443" -servername "${sni}" -alpn h2 -tls1_3 </dev/null 2>/dev/null)
+    fi
+
+    if [[ -n "${startMs}" ]]; then
+        endMs=$(date +%s%3N 2>/dev/null)
+        if [[ "${endMs}" =~ ^[0-9]+$ ]]; then
+            costText=" | 耗时 $((endMs - startMs))ms"
+        fi
+    fi
+
+    local hasTls13=false hasAlpnH2=false hasCertOk=false
+    echo "${tlsOut}" | grep -Eq "Protocol[[:space:]]*:[[:space:]]*TLSv1\.3|New, TLSv1\.3" && hasTls13=true
+    echo "${tlsOut}" | grep -Eq "ALPN protocol:[[:space:]]*h2" && hasAlpnH2=true
+    echo "${tlsOut}" | grep -Eq "Verify return code:[[:space:]]*0" && hasCertOk=true
+
+    local cfWarn=""
+    if command -v curl >/dev/null 2>&1; then
+        local hdrs
+        hdrs=$(curl -sI --max-time 3 "https://${sni}" 2>/dev/null | tr -d '\r')
+        if echo "${hdrs}" | grep -qiE "^server:[[:space:]]*cloudflare|^cf-ray:"; then
+            cfWarn=" (提示: 检测到 Cloudflare CDN 特征，建议更换直连大厂源站)"
+        fi
+    fi
+
+    if [[ "${hasTls13}" == "true" && "${hasAlpnH2}" == "true" && "${hasCertOk}" == "true" ]]; then
+        echoContent green "    ${sni}:443  ->  [TLSv1.3 + H2 + 证书信任 正常${costText}]${cfWarn}"
+    elif [[ -n "${tlsOut}" ]]; then
+        echoContent yellow "    ${sni}:443  ->  [握手异常: TLS1.3=${hasTls13}, H2=${hasAlpnH2}, 证书OK=${hasCertOk}${costText}]${cfWarn}"
+    else
+        echoContent red "    ${sni}:443  ->  [无法握手或连接超时，请更换伪装域名]"
+    fi
+}
+
+# 向待检测端口列表追加未在 portManagement 中列出的协议端口
+appendExtraHealthPort() {
+    local pName="$1"
+    local pPort="$2"
+    local pType="${3:-tcp}"
+    if [[ "${pPort}" =~ ^[0-9]+$ ]]; then
+        collectedProtoNames+=("${pName}")
+        collectedProtoFiles+=("")
+        collectedProtoPorts+=("${pPort}")
+        collectedProtoTypes+=("${pType}")
+        collectedProtoCores+=("sing-box")
+        collectedProtoHops+=("")
+    fi
+}
+
+# 节点健康自检面板
+nodeHealthCheck() {
+    readInstallType
+    readInstallProtocolType
+    readConfigHostPathUUID
+    readSingBoxConfig >/dev/null 2>&1
+    readNginxSubscribe >/dev/null 2>&1
+
+    echoContent skyBlue "\n========================= 节点健康自检面板 ========================="
+
+    # 1. 核心进程与内存占用
+    echoContent yellow "  [1/5] 核心进程与服务状态"
+    local pid memMb
+    pid=$(pgrep -f "xray/xray" 2>/dev/null | head -n 1)
+    if [[ -n "${pid}" ]]; then
+        memMb=$(getProcessRssMb "${pid}")
+        echoContent green "    Xray-core  : 运行中 (PID: ${pid} | 内存: ${memMb} MB)"
+    elif [[ "${coreInstallType}" == "1" ]]; then
+        echoContent red "    Xray-core  : 未运行！(请检查日志或重启核心)"
+    else
+        echoContent white "    Xray-core  : 未安装"
+    fi
+
+    pid=$(pgrep -f "sing-box/sing-box" 2>/dev/null | head -n 1)
+    if [[ -n "${pid}" ]]; then
+        memMb=$(getProcessRssMb "${pid}")
+        echoContent green "    sing-box   : 运行中 (PID: ${pid} | 内存: ${memMb} MB)"
+    elif [[ "${coreInstallType}" == "2" ]] || { [[ -n "${singBoxConfigPath}" ]] && { [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]] || [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]] || [[ -f "${singBoxConfigPath}20_socks5_inbounds.json" ]]; }; }; then
+        echoContent red "    sing-box   : 未运行！(请检查日志或重启核心)"
+    else
+        echoContent white "    sing-box   : 未安装"
+    fi
+
+    pid=$(pgrep -x "nginx" 2>/dev/null | head -n 1)
+    if [[ -z "${pid}" ]]; then
+        pid=$(pgrep -f "/nginx" 2>/dev/null | head -n 1)
+    fi
+    if [[ -n "${pid}" ]]; then
+        echoContent green "    Nginx      : 运行中 (PID: ${pid})"
+    elif command -v nginx >/dev/null 2>&1 || [[ -x /usr/sbin/nginx || -x /usr/local/nginx/sbin/nginx ]]; then
+        echoContent yellow "    Nginx      : 已安装但未运行"
+    else
+        echoContent white "    Nginx      : 未安装(纯 Reality/QUIC 免依赖模式)"
+    fi
+
+    # 2. 内核 BBR 与网络连通性
+    echoContent yellow "\n  [2/5] 内核 BBR 拥塞控制与网络出站"
+    local cc qdisc
+    cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    if [[ "${cc}" == "bbr" ]]; then
+        echoContent green "    BBR 状态   : 已开启 (${cc} + ${qdisc:-unknown})"
+    else
+        echoContent yellow "    BBR 状态   : 未开启 (${cc:-unknown} + ${qdisc:-unknown})，建议在菜单「BBR 与调优」启用"
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        local v4Code v6Code
+        v4Code=$(curl -4 -fsSo /dev/null --max-time 3 -w "%{http_code}" https://cp.cloudflare.com/generate_204 2>/dev/null)
+        v6Code=$(curl -6 -fsSo /dev/null --max-time 3 -w "%{http_code}" https://cp.cloudflare.com/generate_204 2>/dev/null)
+        if [[ "${v4Code}" == "204" ]]; then
+            echoContent green "    IPv4 出站  : 连通正常"
+        else
+            echoContent red "    IPv4 出站  : 连接超时或受限 (状态码: ${v4Code:-N/A})"
+        fi
+        if [[ "${v6Code}" == "204" ]]; then
+            echoContent green "    IPv6 出站  : 连通正常"
+        else
+            echoContent white "    IPv6 出站  : 未配置或不可达"
+        fi
+    fi
+
+    # 3. 协议端口实际监听核验
+    echoContent yellow "\n  [3/5] 协议端口监听核验 (ss/lsof 实测)"
+    collectInstalledPorts
+
+    if [[ "${coreInstallType}" == "2" ]]; then
+        appendExtraHealthPort "VLESS+WS" "${singBoxVLESSWSPort}" "tcp"
+        appendExtraHealthPort "VMess+WS" "${singBoxVMessWSPort}" "tcp"
+        appendExtraHealthPort "VMess+HTTPUpgrade" "${singBoxVMessHTTPUpgradePort}" "tcp"
+    fi
+    appendExtraHealthPort "AnyTLS" "${singBoxAnyTLSPort}" "tcp"
+    appendExtraHealthPort "Naive" "${singBoxNaivePort}" "tcp"
+    appendExtraHealthPort "SOCKS5" "${singBoxSocks5Port}" "tcp"
+
+    local -a tcpPortsList=() udpPortsList=() hopRangeList=()
+    local i pName pPort pType pHop
+    if [[ ${#collectedProtoPorts[@]} -eq 0 ]]; then
+        echoContent white "    暂未检测到已安装的协议端口"
+    else
+        for ((i = 0; i < ${#collectedProtoPorts[@]}; i++)); do
+            pName="${collectedProtoNames[i]}"
+            pPort="${collectedProtoPorts[i]}"
+            pType="${collectedProtoTypes[i]}"
+            pHop="${collectedProtoHops[i]}"
+            if [[ "${pType}" == "udp" ]]; then
+                udpPortsList+=("${pPort}")
+            else
+                tcpPortsList+=("${pPort}")
+            fi
+            if [[ -n "${pHop}" ]]; then
+                hopRangeList+=("${pHop}")
+            fi
+            if checkPortListening "${pType}" "${pPort}"; then
+                echoContent green "    [${pType^^}] ${pPort} (${pName})${pHop}  ->  正在监听"
+            else
+                echoContent red "    [${pType^^}] ${pPort} (${pName})${pHop}  ->  未检测到监听！"
+            fi
+        done
+    fi
+
+    # 4. TLS 证书与 Reality 伪装域名探活
+    echoContent yellow "\n  [4/5] TLS 证书与 Reality 伪装域名探活"
+    if getTlsCertStatus; then
+        if [[ "${tlsCertRemainingDays}" =~ ^[0-9]+$ ]] && ((tlsCertRemainingDays <= ${sslRenewalThresholdDays:-30})); then
+            echoContent yellow "    TLS 证书   : ${tlsCertSummary} (建议及时续期)"
+        else
+            echoContent green "    TLS 证书   : ${tlsCertSummary}"
+        fi
+    else
+        echoContent white "    TLS 证书   : ${tlsCertSummary}"
+    fi
+
+    local -a sniCandidates=() uniqueSnis=()
+    [[ -n "${xrayVLESSRealityServerName}" ]] && sniCandidates+=("${xrayVLESSRealityServerName}")
+    [[ -n "${singBoxVLESSRealityVisionServerName}" ]] && sniCandidates+=("${singBoxVLESSRealityVisionServerName}")
+    [[ -n "${singBoxVLESSRealityGRPCServerName}" ]] && sniCandidates+=("${singBoxVLESSRealityGRPCServerName}")
+    [[ -n "${xrayVLESSRealityXHTTPServerName}" ]] && sniCandidates+=("${xrayVLESSRealityXHTTPServerName}")
+
+    local sni seen existing
+    for sni in "${sniCandidates[@]}"; do
+        seen=false
+        for existing in "${uniqueSnis[@]}"; do
+            [[ "${existing}" == "${sni}" ]] && seen=true && break
+        done
+        [[ "${seen}" == "false" ]] && uniqueSnis+=("${sni}")
+    done
+
+    if [[ ${#uniqueSnis[@]} -gt 0 ]]; then
+        for sni in "${uniqueSnis[@]}"; do
+            checkRealitySniHealth "${sni}"
+        done
+    else
+        echoContent white "    Reality SNI: 未安装 Reality 协议，跳过握手探活"
+    fi
+
+    # 5. 云防火墙 / 安全组放行清单
+    echoContent yellow "\n  [5/5] 云安全组与本机防火墙放行清单"
+    local tcpJoined="" udpJoined="" hopJoined="" portItem
+    for portItem in "${tcpPortsList[@]}"; do
+        if [[ ",${tcpJoined}," != *",${portItem},"* ]]; then
+            tcpJoined="${tcpJoined:+${tcpJoined},}${portItem}"
+        fi
+    done
+    for portItem in "${udpPortsList[@]}"; do
+        if [[ ",${udpJoined}," != *",${portItem},"* ]]; then
+            udpJoined="${udpJoined:+${udpJoined},}${portItem}"
+        fi
+    done
+    for portItem in "${hopRangeList[@]}"; do
+        hopJoined="${hopJoined:+${hopJoined} }${portItem}"
+    done
+
+    echoContent skyBlue "    请确认 VPS 云控制台安全组已放行以下端口:"
+    echoContent white "      TCP 端口 : ${tcpJoined:-无 (若使用 ACME 证书需额外放行 80)}"
+    echoContent white "      UDP 端口 : ${udpJoined:-无}${hopJoined:+ | ${hopJoined}}"
+
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+        echoContent white "    本机防火墙 : ufw 运行中"
+    elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -qi "running"; then
+        echoContent white "    本机防火墙 : firewalld 运行中"
+    else
+        echoContent white "    本机防火墙 : 无活跃 ufw/firewalld 或由 iptables/nftables 托管"
+    fi
+
+    echoContent red "=================================================================="
+    read -r -p "按回车键返回主菜单..." _
+    menu
+}
+
 # 端口管理
 portManagement() {
     readInstallType
@@ -6841,201 +7471,19 @@ portManagement() {
     echoContent yellow "提示：修改端口后，脚本将自动更新配置文件、放行防火墙、重启服务并刷新订阅"
     echoContent red "================================================================"
 
-    local -a protocolNames=()
-    local -a protocolFiles=()
-    local -a protocolPorts=()
-    local -a protocolTypes=()
-    local -a protocolCores=()
+    collectInstalledPorts
 
-    local index=0
+    local -a protocolNames=("${collectedProtoNames[@]}")
+    local -a protocolFiles=("${collectedProtoFiles[@]}")
+    local -a protocolPorts=("${collectedProtoPorts[@]}")
+    local -a protocolTypes=("${collectedProtoTypes[@]}")
+    local -a protocolCores=("${collectedProtoCores[@]}")
+    local index=${#protocolNames[@]}
 
-    # 1. VLESS TCP (TLS / Vision)
-    if echo "${currentInstallProtocolType}" | grep -q ",0,"; then
-        local pFile="" pPort="" pCore=""
-        if [[ "${coreInstallType}" == "1" && -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
-            pFile="${configPath}02_VLESS_TCP_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}")
-            pCore="xray"
-        elif [[ -f "${singBoxConfigPath}02_VLESS_TCP_inbounds.json" ]]; then
-            pFile="${singBoxConfigPath}02_VLESS_TCP_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}")
-            pCore="sing-box"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            protocolNames+=("VLESS TCP (TLS_Vision)")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("tcp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. VLESS TCP (TLS_Vision) 当前端口: ${pPort}"
-        fi
-    fi
-
-    # 2. Hysteria2
-    if echo "${currentInstallProtocolType}" | grep -q ",6," || [[ -n "${hysteriaPort}" ]]; then
-        local pFile="" pPort="" pCore=""
-        if [[ "${coreInstallType}" == "1" && -f "${configPath}06_hysteria2_inbounds.json" ]]; then
-            pFile="${configPath}06_hysteria2_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}")
-            pCore="xray"
-        elif [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
-            pFile="${singBoxConfigPath}06_hysteria2_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}")
-            pCore="sing-box"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            readPortHopping "hysteria2" "${pPort}"
-            local hopInfo=""
-            if [[ -n "${hysteria2PortHoppingStart}" ]]; then
-                hopInfo=" (跳跃: ${hysteria2PortHopping})"
-            fi
-            protocolNames+=("Hysteria2 TLS")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("udp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. Hysteria2 TLS 当前端口: ${pPort}${hopInfo}"
-        fi
-    fi
-
-    # 3. VLESS Reality (Vision)
-    if echo "${currentInstallProtocolType}" | grep -q ",7,"; then
-        local pFile="" pPort="" pCore=""
-        if [[ "${coreInstallType}" == "1" && -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
-            pFile="${configPath}07_VLESS_vision_reality_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}")
-            pCore="xray"
-        elif [[ -f "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" ]]; then
-            pFile="${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}")
-            pCore="sing-box"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            protocolNames+=("VLESS Reality (Vision)")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("tcp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. VLESS Reality (Vision) 当前端口: ${pPort}"
-        fi
-    fi
-
-    # 4. VLESS Reality (gRPC)
-    if echo "${currentInstallProtocolType}" | grep -q ",8,"; then
-        local pFile="" pPort="" pCore=""
-        if [[ "${coreInstallType}" == "1" && -f "${configPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
-            pFile="${configPath}08_VLESS_vision_gRPC_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}")
-            pCore="xray"
-        elif [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
-            pFile="${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}")
-            pCore="sing-box"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            protocolNames+=("VLESS Reality (gRPC)")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("tcp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. VLESS Reality (gRPC) 当前端口: ${pPort}"
-        fi
-    fi
-
-    # 4b. VLESS Reality (XHTTP)
-    if echo "${currentInstallProtocolType}" | grep -q ",12,"; then
-        local pFile="" pPort="" pCore=""
-        if [[ "${coreInstallType}" == "1" && -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
-            pFile="${configPath}12_VLESS_XHTTP_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}")
-            pCore="xray"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            protocolNames+=("VLESS Reality (XHTTP)")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("tcp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. VLESS Reality (XHTTP) 当前端口: ${pPort}"
-        fi
-    fi
-
-    # 4c. VLESS XHTTP (TLS)
-    if echo "${currentInstallProtocolType}" | grep -q ",14,"; then
-        local pFile="" pPort="" pCore=""
-        if [[ "${coreInstallType}" == "1" && -f "${configPath}14_VLESS_XHTTP_TLS_inbounds.json" ]]; then
-            pFile="${configPath}14_VLESS_XHTTP_TLS_inbounds.json"
-            pPort=$(jq -r '.inbounds[1].port // empty' "${pFile}")
-            pCore="xray"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            protocolNames+=("VLESS XHTTP (TLS)")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("tcp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. VLESS XHTTP (TLS) 当前端口: ${pPort}"
-        fi
-    fi
-
-    # 4d. Trojan TCP (TLS)
-    if echo "${currentInstallProtocolType}" | grep -q ",4,"; then
-        local pFile="" pPort="" pCore=""
-        if [[ "${coreInstallType}" == "1" && -f "${configPath}04_trojan_TCP_inbounds.json" ]]; then
-            pFile="${configPath}04_trojan_TCP_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].port // empty' "${pFile}")
-            pCore="xray"
-        elif [[ -f "${singBoxConfigPath}04_trojan_TCP_inbounds.json" ]]; then
-            pFile="${singBoxConfigPath}04_trojan_TCP_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}")
-            pCore="sing-box"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            protocolNames+=("Trojan TCP (TLS)")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("tcp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. Trojan TCP (TLS) 当前端口: ${pPort}"
-        fi
-    fi
-
-    # 5. TUIC
-    if echo "${currentInstallProtocolType}" | grep -q ",9," || [[ -n "${tuicPort}" ]]; then
-        local pFile="" pPort="" pCore=""
-        if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
-            pFile="${singBoxConfigPath}09_tuic_inbounds.json"
-            pPort=$(jq -r '.inbounds[0].listen_port // empty' "${pFile}")
-            pCore="sing-box"
-        fi
-        if [[ -n "${pPort}" ]]; then
-            index=$((index + 1))
-            protocolNames+=("TUIC TLS")
-            protocolFiles+=("${pFile}")
-            protocolPorts+=("${pPort}")
-            protocolTypes+=("udp")
-            protocolCores+=("${pCore}")
-            echoContent yellow "${index}. TUIC TLS 当前端口: ${pPort}"
-        fi
-    fi
-
-    # 6. Nginx 订阅端口
-    if [[ -n "${subscribePort}" && -f "${nginxConfigPath}subscribe.conf" ]]; then
-        index=$((index + 1))
-        protocolNames+=("Nginx 订阅服务")
-        protocolFiles+=("${nginxConfigPath}subscribe.conf")
-        protocolPorts+=("${subscribePort}")
-        protocolTypes+=("tcp")
-        protocolCores+=("nginx")
-        echoContent yellow "${index}. Nginx 订阅服务 当前端口: ${subscribePort}"
-    fi
+    local i
+    for ((i = 0; i < index; i++)); do
+        echoContent yellow "$((i + 1)). ${protocolNames[i]} 当前端口: ${protocolPorts[i]}${collectedProtoHops[i]}"
+    done
 
     if [[ ${index} -eq 0 ]]; then
         echoContent red " ---> 未找到可管理的协议端口"
@@ -7049,6 +7497,7 @@ portManagement() {
     read -r -p "请选择要修改端口的序号 [0-${index}]: " selectedIndex
 
     if [[ "${selectedIndex}" == "0" || -z "${selectedIndex}" ]]; then
+        menu
         return 0
     fi
 
@@ -7326,11 +7775,25 @@ unInstall() {
         return 1
     }
 
-    rm -rf /etc/v2ray-agent
-    rm -rf ${nginxConfigPath}alone.conf
-    rm -rf ${nginxConfigPath}checkPortOpen.conf >/dev/null 2>&1
+    # 清理脚本创建的定时任务
+    if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -q "/etc/v2ray-agent/"; then
+        crontab -l 2>/dev/null | grep -v "/etc/v2ray-agent/" | crontab - 2>/dev/null || true
+        echoContent green " ---> 清理定时任务完成"
+    fi
+
+    # 保留证书文件（/root/.acme.sh 与 /etc/v2ray-agent/tls 下的证书），彻底清理其余所有目录与配置
+    if [[ -d "/etc/v2ray-agent/tls" ]] && [[ -n $(find /etc/v2ray-agent/tls -maxdepth 1 -type f \( -name "*.crt" -o -name "*.key" \) 2>/dev/null) ]]; then
+        rm -f /etc/v2ray-agent/tls/acme.log >/dev/null 2>&1
+        find /etc/v2ray-agent -mindepth 1 -maxdepth 1 ! -name "tls" -exec rm -rf {} + 2>/dev/null
+        echoContent green " ---> 已保留 /etc/v2ray-agent/tls 证书文件，其余组件与配置已全部删除"
+    else
+        rm -rf /etc/v2ray-agent
+    fi
+
+    rm -rf "${nginxConfigPath}alone.conf" >/dev/null 2>&1
+    rm -rf "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
     rm -rf "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" >/dev/null 2>&1
-    rm -rf ${nginxConfigPath}checkPortOpen.conf >/dev/null 2>&1
+    rm -rf "${nginxConfigPath}00-server-names-hash.conf" >/dev/null 2>&1
 
     unInstallSubscribe
 
@@ -7339,8 +7802,7 @@ unInstall() {
         echoContent green " ---> 删除伪装网站完成"
     fi
 
-    rm -rf /usr/bin/vasma
-    rm -rf /usr/sbin/vasma
+    rm -rf /usr/bin/vasma /usr/sbin/vasma
     echoContent green " ---> 卸载快捷方式完成"
     echoContent green " ---> 卸载v2ray-agent脚本完成"
 }
@@ -7837,7 +8299,7 @@ updateV2RayAgent() {
     aliasInstall
 
     echoContent green "\n ---> 更新完毕"
-    echoContent yellow " ---> 请手动执行 [vasma] 或 [vasgm] 打开脚本"
+    echoContent yellow " ---> 请手动执行 [vasma] 打开脚本"
     echoContent green " ---> 当前版本：${version}\n"
     echoContent yellow "如更新不成功，请手动执行下面命令\n"
     echoContent skyBlue "wget -P /root -N --no-check-certificate \"https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh?t=\$(date +%s)\" && chmod 700 /root/install.sh && /root/install.sh"
@@ -7865,10 +8327,10 @@ handleFirewall() {
 bbrInstall() {
     echoContent red "\n=============================================================="
     echoContent green "BBR、DD脚本用的[ylx2016]的成熟作品，地址[https://github.com/ylx2016/Linux-NetSpeed]，请熟知"
-    echoContent yellow "1.安装脚本【推荐原版BBR+FQ】"
-    echoContent yellow "2.回退主目录"
+    echoContent yellow "  1. 安装 BBR / 内核加速脚本【推荐原版 BBR+FQ】"
+    echoContent skyBlue "  0. 返回主菜单"
     echoContent red "=============================================================="
-    read -r -p "请选择:" installBBRStatus
+    read -r -p "请选择 [0-1]:" installBBRStatus
     if [[ "${installBBRStatus}" == "1" ]]; then
         wget -O tcpx.sh "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh
     else
@@ -7983,20 +8445,18 @@ aliasInstall() {
     if [[ -f "/etc/v2ray-agent/install.sh" ]]; then
         chmod 700 /etc/v2ray-agent/install.sh 2>/dev/null || true
         if [[ -d "/usr/bin/" ]]; then
-            if [[ ! -L "/usr/bin/vasma" || ! -L "/usr/bin/vasgm" ]]; then
+            if [[ ! -L "/usr/bin/vasma" ]]; then
                 ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasma
-                ln -sf /etc/v2ray-agent/install.sh /usr/bin/vasgm
-                chmod 700 /usr/bin/vasma /usr/bin/vasgm 2>/dev/null || true
+                chmod 700 /usr/bin/vasma 2>/dev/null || true
             fi
         elif [[ -d "/usr/sbin" ]]; then
-            if [[ ! -L "/usr/sbin/vasma" || ! -L "/usr/sbin/vasgm" ]]; then
+            if [[ ! -L "/usr/sbin/vasma" ]]; then
                 ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasma
-                ln -sf /etc/v2ray-agent/install.sh /usr/sbin/vasgm
-                chmod 700 /usr/sbin/vasma /usr/sbin/vasgm 2>/dev/null || true
+                chmod 700 /usr/sbin/vasma 2>/dev/null || true
             fi
         fi
         if [[ "${vasmaType}" == "true" ]]; then
-            echoContent green "快捷方式创建成功，可执行 [vasma] 或 [vasgm] 重新打开脚本"
+            echoContent green "快捷方式创建成功，可执行 [vasma] 重新打开脚本"
         fi
     fi
 }
@@ -11609,34 +12069,40 @@ customSingBoxInstall() {
     fi
 
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]]; then
-        readLastInstallationConfig
-        unInstallSubscribe
-        totalProgress=9
-        installTools 1 || return 1
-        # 申请tls
-        if echo "${selectCustomInstallType}" | grep -q -E ",0,|,1,|,3,|,4,|,6,|,9,|,10,|,11,|,13,"; then
-            initTLSNginxConfig 2 || return 1
-            installTLS 3 || return 1
-            handleNginx stop || return 1
-        fi
-
-        removeCoreService xray || return 1
-        installSingBox 4 || return 1
-        installSingBoxService 5 || return 1
-        initSingBoxConfig custom 6 || return 1
-        cleanUp xrayDel || return 1
-        installCronTLS 7
-        handleSingBox stop
-        handleSingBox start
-        handleNginx stop || return 1
-        handleNginx start || return 1
-        # 生成账号
-        checkGFWStatue 8
-        showAccounts 9
+        runCustomSingBoxInstall
     else
         echoContent red " ---> 输入不合法"
         customSingBoxInstall
     fi
+}
+
+# 执行 sing-box 个性化/预设安装流程
+runCustomSingBoxInstall() {
+    selectCoreType=2
+    readLastInstallationConfig
+    unInstallSubscribe
+    totalProgress=9
+    installTools 1 || return 1
+    # 申请tls
+    if echo "${selectCustomInstallType}" | grep -q -E ",0,|,1,|,3,|,4,|,6,|,9,|,10,|,11,|,13,"; then
+        initTLSNginxConfig 2 || return 1
+        installTLS 3 || return 1
+        handleNginx stop || return 1
+    fi
+
+    removeCoreService xray || return 1
+    installSingBox 4 || return 1
+    installSingBoxService 5 || return 1
+    initSingBoxConfig custom 6 || return 1
+    cleanUp xrayDel || return 1
+    installCronTLS 7
+    handleSingBox stop
+    handleSingBox start
+    handleNginx stop || return 1
+    handleNginx start || return 1
+    # 生成账号
+    checkGFWStatue 8
+    showAccounts 9
 }
 
 # 一键无域名Xray-core Reality
@@ -11709,71 +12175,122 @@ customXrayInstall() {
     fi
     selectCustomInstallType=$(normalizeXrayInstallSelection "${selectCustomInstallType}")
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]]; then
-        readLastInstallationConfig
-        unInstallSubscribe
-        # checkBTPanel
-        # check1Panel
-        totalProgress=12
-        installTools 1 || return 1
-        if [[ -n "${btDomain}" ]]; then
-            echoContent skyBlue "\n进度  3/${totalProgress} : 检测到宝塔面板/1Panel，跳过申请TLS步骤"
-            handleXray stop
-            if xraySelectionNeedsCustomPort "${selectCustomInstallType}"; then
-                customPortFunction || return 1
-            fi
-        else
-            # 申请tls
-            if xraySelectionNeedsCertificate "${selectCustomInstallType}"; then
-                initTLSNginxConfig 2 || return 1
-                handleXray stop
-                installTLS 3 || return 1
-            else
-                echoContent skyBlue "\n进度  2/${totalProgress} : 检测到仅安装Reality，跳过TLS证书步骤"
-            fi
-        fi
-
-        handleNginx stop || return 1
-        # 随机path
-        if echo "${selectCustomInstallType}" | grep -qE ",1,|,2,|,3,|,5,|,12,|,14,"; then
-            randomPathFunction 4
-        fi
-        if [[ -n "${btDomain}" ]]; then
-            echoContent skyBlue "\n进度  6/${totalProgress} : 检测到宝塔面板/1Panel，跳过伪装网站"
-        elif ! xraySelectionNeedsNginx "${selectCustomInstallType}"; then
-            echoContent skyBlue "\n进度  6/${totalProgress} : 所选协议无需Nginx，跳过伪装网站"
-        else
-            nginxBlog 6
-        fi
-        if xraySelectionNeedsNginx "${selectCustomInstallType}"; then
-            updateRedirectNginxConf
-            handleNginx start || return 1
-        fi
-
-        # 安装Xray
-        if ! [[ "${selectCustomInstallType}" == *,6,* && -f /etc/v2ray-agent/sing-box/conf/config.json ]]; then
-            removeCoreService sing-box || return 1
-        fi
-        installXray 7 false || return 1
-        installXrayService 8 || return 1
-        # A custom installation is a replacement: remove protocol fragments
-        # that are not part of the new selection.
-        initXrayConfig custom 9 || return 1
-        if ! [[ "${selectCustomInstallType}" == *,6,* && -f /etc/v2ray-agent/sing-box/conf/config.json ]]; then
-            cleanUp singBoxDel || return 1
-        fi
-        if xraySelectionNeedsCertificate "${selectCustomInstallType}"; then
-            installCronTLS 10
-        fi
-
-        handleXray stop
-        handleXray start
-        # 生成账号
-        checkGFWStatue 11
-        showAccounts 12
+        runCustomXrayInstall
     else
         echoContent red " ---> 输入不合法"
         customXrayInstall
     fi
+}
+
+# 执行 Xray-core 个性化/预设安装流程
+runCustomXrayInstall() {
+    selectCoreType=1
+    selectCustomInstallType=$(normalizeXrayInstallSelection "${selectCustomInstallType}")
+    readLastInstallationConfig
+    unInstallSubscribe
+    # checkBTPanel
+    # check1Panel
+    totalProgress=12
+    installTools 1 || return 1
+    if [[ -n "${btDomain}" ]]; then
+        echoContent skyBlue "\n进度  3/${totalProgress} : 检测到宝塔面板/1Panel，跳过申请TLS步骤"
+        handleXray stop
+        if xraySelectionNeedsCustomPort "${selectCustomInstallType}"; then
+            customPortFunction || return 1
+        fi
+    else
+        # 申请tls
+        if xraySelectionNeedsCertificate "${selectCustomInstallType}"; then
+            initTLSNginxConfig 2 || return 1
+            handleXray stop
+            installTLS 3 || return 1
+        else
+            echoContent skyBlue "\n进度  2/${totalProgress} : 检测到仅安装Reality，跳过TLS证书步骤"
+        fi
+    fi
+
+    handleNginx stop || return 1
+    # 随机path
+    if echo "${selectCustomInstallType}" | grep -qE ",1,|,2,|,3,|,5,|,12,|,14,"; then
+        randomPathFunction 4
+    fi
+    if [[ -n "${btDomain}" ]]; then
+        echoContent skyBlue "\n进度  6/${totalProgress} : 检测到宝塔面板/1Panel，跳过伪装网站"
+    elif ! xraySelectionNeedsNginx "${selectCustomInstallType}"; then
+        echoContent skyBlue "\n进度  6/${totalProgress} : 所选协议无需Nginx，跳过伪装网站"
+    else
+        nginxBlog 6
+    fi
+    if xraySelectionNeedsNginx "${selectCustomInstallType}"; then
+        updateRedirectNginxConf
+        handleNginx start || return 1
+    fi
+
+    # 安装Xray
+    if [[ "${goldenTrioPreset}" == "true" ]] || ! [[ "${selectCustomInstallType}" == *,6,* && -f /etc/v2ray-agent/sing-box/conf/config.json ]]; then
+        removeCoreService sing-box || return 1
+    fi
+    installXray 7 false || return 1
+    installXrayService 8 || return 1
+    # A custom installation is a replacement: remove protocol fragments
+    # that are not part of the new selection.
+    initXrayConfig custom 9 || return 1
+    if [[ "${goldenTrioPreset}" == "true" ]] || ! [[ "${selectCustomInstallType}" == *,6,* && -f /etc/v2ray-agent/sing-box/conf/config.json ]]; then
+        cleanUp singBoxDel || return 1
+    fi
+    if xraySelectionNeedsCertificate "${selectCustomInstallType}"; then
+        installCronTLS 10
+    fi
+
+    handleXray stop
+    handleXray start
+    # 生成账号
+    checkGFWStatue 11
+    showAccounts 12
+}
+
+# 黄金抗封锁 3 件套一键部署 (,0,6,7,)
+installGoldenTrio() {
+    echoContent skyBlue "\n===================== 黄金抗封锁 3 件套预设 ====================="
+    echoContent green  "  协议组合 : VLESS+Reality[Vision] + Hysteria2 + VLESS+TCP[TLS_Vision]"
+    echoContent yellow "  零冲突端口自动分配:"
+    echoContent white  "    • VLESS+Reality(Vision)  -> TCP 443  (主力抗封锁 / 免TLS防探测)"
+    echoContent white  "    • Hysteria2 (QUIC)       -> UDP 443  (弱网/高丢包高速通道)"
+    echoContent white  "    • VLESS+TCP(TLS_Vision)  -> TCP 8443 (伪装站点回落兜底)"
+    echoContent yellow "  提示：部署前请准备 1 个已解析到本机的域名（用于 Hy2 与 Vision TLS）"
+    echoContent red "================================================================"
+    echoContent yellow "  1. Xray-core 单核部署 (推荐，单进程原生直跑三大协议)"
+    echoContent yellow "  2. sing-box 核心部署"
+    echoContent skyBlue "  0. 返回部署菜单"
+    echoContent red "================================================================"
+    local trioCoreChoice rc=0
+    read -r -p "请选择部署核心 [0-2]: " trioCoreChoice
+
+    case "${trioCoreChoice}" in
+    1)
+        goldenTrioPreset=true
+        selectCustomInstallType=",0,6,7,"
+        runCustomXrayInstall
+        rc=$?
+        goldenTrioPreset=false
+        return ${rc}
+        ;;
+    2)
+        goldenTrioPreset=true
+        selectCustomInstallType=",0,6,7,"
+        runCustomSingBoxInstall
+        rc=$?
+        goldenTrioPreset=false
+        return ${rc}
+        ;;
+    0 | "")
+        deployNodeMenu
+        ;;
+    *)
+        echoContent red " ---> 输入无效，请重新选择"
+        installGoldenTrio
+        ;;
+    esac
 }
 
 # 选择核心安装sing-box、xray-core
@@ -12456,103 +12973,103 @@ rule-providers:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Lan/Lan.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Lan/Lan.yaml
     path: ./ruleset/lan.yaml
   AdvertisingLite:
     type: http
     behavior: domain
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/AdvertisingLite/AdvertisingLite_Domain.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/AdvertisingLite/AdvertisingLite_Domain.yaml
     path: ./ruleset/advertising_lite.yaml
   OpenAI:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.yaml
     path: ./ruleset/openai.yaml
   ClaudeAI:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.yaml
     path: ./ruleset/claudeai.yaml
   Bing:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Bing/Bing.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Bing/Bing.yaml
     path: ./ruleset/bing.yaml
   YouTube:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/YouTube/YouTube.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/YouTube/YouTube.yaml
     path: ./ruleset/youtube.yaml
   Google:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Google/Google.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Google/Google.yaml
     path: ./ruleset/google.yaml
   GitHub:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/GitHub/GitHub.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/GitHub/GitHub.yaml
     path: ./ruleset/github.yaml
   Telegram:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Telegram/Telegram.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Telegram/Telegram.yaml
     path: ./ruleset/telegram.yaml
   Netflix:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Netflix/Netflix.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Netflix/Netflix.yaml
     path: ./ruleset/netflix.yaml
   Spotify:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Spotify/Spotify.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Spotify/Spotify.yaml
     path: ./ruleset/spotify.yaml
   HBO:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/HBO/HBO.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/HBO/HBO.yaml
     path: ./ruleset/hbo.yaml
   Disney:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Disney/Disney.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Disney/Disney.yaml
     path: ./ruleset/disney.yaml
   ChinaMedia:
     type: http
     behavior: classical
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMedia/ChinaMedia.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMedia/ChinaMedia.yaml
     path: ./ruleset/chinamedia.yaml
   GlobalDomain:
     type: http
     behavior: domain
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Global/Global_Domain.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Global/Global_Domain.yaml
     path: ./ruleset/global_domain.yaml
   ChinaMaxDomain:
     type: http
     behavior: domain
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_Domain.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_Domain.yaml
     path: ./ruleset/chinamax_domain.yaml
   ChinaMaxIPNoIPv6:
     type: http
     behavior: ipcidr
     interval: 86400
-    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_IP_No_IPv6.yaml
+    url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_IP_No_IPv6.yaml
     path: ./ruleset/chinamax_ip.yaml
 
 rules:
@@ -12975,6 +13492,12 @@ initRealityClientServersName() {
     elif [[ "${coreInstallType}" == "2" || "${selectCoreType}" == "2" ]]; then
         realityDestDomainList="www.samsung.com,aws.amazon.com,download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,www.lovelive-anime.jp,academy.nvidia.com,dl.google.com,www.google-analytics.com,www.python.org,vuejs-jp.org,vuejs.org,zh-hk.vuejs.org,react.dev,www.oracle.com,www.mysql.com,www.mongodb.com,cname.vercel-dns.com,vercel-dns.com,www.swift.com,academy.nvidia.com,www.swift.com,www.cisco.com,www.asus.com,www.amd.com,www.fom-international.com,github.io"
     fi
+    if [[ "${goldenTrioPreset}" == "true" ]]; then
+        if [[ (-n "${domain}" && "${realityServerName}" == "${domain}") || (-n "${currentHost}" && "${realityServerName}" == "${currentHost}") ]]; then
+            realityServerName=
+            realityDomainPort=
+        fi
+    fi
     if [[ -n "${realityServerName}" && -z "${lastInstallationConfig}" ]]; then
         if echo ${realityDestDomainList} | grep -q "${realityServerName}"; then
             read -r -p "读取到上次安装设置的Reality域名，是否使用？[y/n]:" realityServerNameStatus
@@ -12992,7 +13515,7 @@ initRealityClientServersName() {
     fi
 
     if [[ -z "${realityServerName}" ]]; then
-        if [[ -n "${domain}" ]]; then
+        if [[ -n "${domain}" && "${goldenTrioPreset}" != "true" ]]; then
             echo
             read -r -p "是否使用 ${domain} 此域名作为Reality目标域名 ？[y/n]:" realityServerNameCurrentDomainStatus
             if [[ "${realityServerNameCurrentDomainStatus}" == "y" ]]; then
@@ -13052,6 +13575,14 @@ initRealityClientServersName() {
 }
 # 初始化reality端口
 initXrayRealityPort() {
+    if [[ "${goldenTrioPreset}" == "true" ]]; then
+        realityPort=443
+        handleXray stop >/dev/null 2>&1
+        checkPort "${realityPort}"
+        allowPort "${realityPort}"
+        echoContent yellow "\n ---> [黄金3件套] VLESS+Reality 自动分配端口: TCP ${realityPort}"
+        return 0
+    fi
     if [[ -n "${xrayVLESSRealityPort}" && -z "${lastInstallationConfig}" ]]; then
         read -r -p "读取到上次安装记录，是否使用上次安装时的端口 ？[y/n]:" historyRealityPortStatus
         if [[ "${historyRealityPortStatus}" == "y" ]]; then
@@ -13551,131 +14082,185 @@ singBoxVersionManageMenu() {
     fi
 }
 
-# 证书与 CDN 综合管理菜单
-certCdnMenu() {
-    echoContent skyBlue "\n======================= 证书与 CDN 管理 ======================="
-    echoContent yellow "  1. SSL 证书管理 (手动更新证书 / 切换证书机构)"
-    echoContent yellow "  2. CDN 优选节点 (添加/管理 Cloudflare 等优选域名或 IP)"
-    echoContent yellow "  3. 切换 TLS ALPN 配置"
+# 节点部署与重装子菜单
+deployNodeMenu() {
+    echoContent skyBlue "\n======================= 节点部署与重装 ======================="
+    echoContent green  "  1. 黄金抗封锁 3 件套 [推荐] (Reality + Hy2 + Vision 零冲突预设)"
+    echoContent yellow "  2. 一键无域名安装         (Reality 免域名极速部署)"
+    if [[ -n "${coreInstallType}" ]]; then
+        echoContent yellow "  3. 重新完整安装           (带域名全套协议)"
+    else
+        echoContent yellow "  3. 完整安装               (带域名全套协议)"
+    fi
+    echoContent yellow "  4. 自定义组合安装         (按需勾选指定协议)"
     echoContent skyBlue "----------------------------------------------------------------"
     echoContent skyBlue "  0. 返回主菜单"
     echoContent red "================================================================"
-    local selCertCdn
-    read -r -p "请选择 [0-3]: " selCertCdn
-    case "${selCertCdn}" in
-    1) renewalTLS 1 ;;
-    2) manageCDN 1 ;;
-    3) switchAlpn 1 ;;
-    *) menu ;;
+    local selDeploy
+    read -r -p "请选择 [0-4]: " selDeploy
+    case "${selDeploy}" in
+    1) installGoldenTrio ;;
+    2)
+        selectInstallType=3
+        selectCoreInstall
+        ;;
+    3)
+        selectInstallType=1
+        selectCoreInstall
+        ;;
+    4)
+        selectInstallType=2
+        selectCoreInstall
+        ;;
+    0 | "") menu ;;
+    *)
+        echoContent red " ---> 输入编号无效，请重新输入 [0-4]"
+        deployNodeMenu
+        ;;
     esac
 }
 
-# 伪装站与安全屏蔽综合菜单
-siteSecurityMenu() {
-    echoContent skyBlue "\n====================== 伪装站与安全策略 ======================"
-    echoContent yellow "  1. 更换伪装站点 (10 款内置静态模板 / 302 跳转)"
-    echoContent yellow "  2. BT 下载与高危端口封禁管理"
-    echoContent yellow "  3. 域名黑名单屏蔽管理"
+# 协议与端口管理子菜单
+protocolPortMenu() {
+    echoContent skyBlue "\n======================= 协议与端口管理 ======================="
+    echoContent yellow "  1. 端口管理       (全协议端口修改 / 防火墙联动 / 订阅刷新)"
+    echoContent yellow "  2. REALITY 管理   (一键更换伪装域名 SNI / 密钥重置)"
+    echoContent yellow "  3. Hysteria2 管理 (端口跳跃配置 / 状态查看)"
+    echoContent yellow "  4. TUIC 协议管理  (安装 / 卸载 / 端口跳跃)"
     echoContent skyBlue "----------------------------------------------------------------"
     echoContent skyBlue "  0. 返回主菜单"
     echoContent red "================================================================"
-    local selSiteSec
-    read -r -p "请选择 [0-3]: " selSiteSec
-    case "${selSiteSec}" in
-    1) updateNginxBlog 1 ;;
-    2) btTools 1 ;;
-    3) blacklist 1 ;;
-    *) menu ;;
+    local selProto
+    read -r -p "请选择 [0-4]: " selProto
+    case "${selProto}" in
+    1) portManagement ;;
+    2) manageReality 1 ;;
+    3) manageHysteriaPortHopping ;;
+    4) manageTuic ;;
+    0 | "") menu ;;
+    *)
+        echoContent red " ---> 输入编号无效，请重新输入 [0-4]"
+        protocolPortMenu
+        ;;
+    esac
+}
+
+# 站点与证书管理综合菜单
+siteCertMenu() {
+    echoContent skyBlue "\n======================= 站点与证书管理 ======================="
+    echoContent yellow "  1. SSL 证书管理   (手动更新证书 / 切换证书机构)"
+    echoContent yellow "  2. CDN 优选节点   (添加/管理 Cloudflare 等优选域名或 IP)"
+    echoContent yellow "  3. 切换 TLS ALPN  (自定义 ALPN 协商策略)"
+    echoContent yellow "  4. 更换伪装站点   (10 款内置静态模板 / 302 跳转)"
+    echoContent yellow "  5. BT 与高危端口  (封禁 BT 下载与高危端口)"
+    echoContent yellow "  6. 域名黑名单     (访问控制与域名屏蔽管理)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    local selSiteCert
+    read -r -p "请选择 [0-6]: " selSiteCert
+    case "${selSiteCert}" in
+    1) renewalTLS 1 ;;
+    2) manageCDN 1 ;;
+    3) switchAlpn 1 ;;
+    4) updateNginxBlog 1 ;;
+    5) btTools 1 ;;
+    6) blacklist 1 ;;
+    0 | "") menu ;;
+    *)
+        echoContent red " ---> 输入编号无效，请重新输入 [0-6]"
+        siteCertMenu
+        ;;
+    esac
+}
+
+# 脚本更新与卸载子菜单
+scriptMaintainMenu() {
+    echoContent skyBlue "\n======================= 脚本更新与卸载 ======================="
+    echoContent yellow "  1. 更新管理脚本   (从 GitHub 同步最新版本)"
+    echoContent red    "  2. 卸载管理脚本   (彻底清理所有服务与配置)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    local selMaint
+    read -r -p "请选择 [0-2]: " selMaint
+    case "${selMaint}" in
+    1) updateV2RayAgent 1 ;;
+    2) unInstall 1 ;;
+    0 | "") menu ;;
+    *)
+        echoContent red " ---> 输入编号无效，请重新输入 [0-2]"
+        scriptMaintainMenu
+        ;;
     esac
 }
 
 # 主菜单
 menu() {
     cd "$HOME" || exit
-    echoContent skyBlue "\n================================================================"
-    echoContent green   "  当前版本：v3.5.41-pr7  (AI修改版)"
-    echoContent skyBlue "  开源仓库：BG666888/v2ray-agent   |   快捷命令：vasma / vasgm\c"
+    readInstallType
+    readInstallProtocolType
+    readConfigHostPathUUID >/dev/null 2>&1
+    readCustomPort >/dev/null 2>&1
+    readSingBoxConfig >/dev/null 2>&1
+
+    echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
+    echoContent green   "│  v2ray-agent (AI修改版) - v3.5.42-pr1       快捷命令: vasma  │"
+    echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
-    echoContent red "\n================================================================"
-
-    echoContent skyBlue "  [安装与部署]"
-    if [[ -n "${coreInstallType}" ]]; then
-        echoContent yellow "    1. 重新完整安装   (带域名全套协议)"
-    else
-        echoContent yellow "    1. 完整安装       (带域名全套协议)"
-    fi
-    echoContent yellow "    2. 任意组合安装   (按需自定义协议)"
-    echoContent yellow "    3. 一键无域名安装 (Reality 免域名极速部署)"
-
-    echoContent skyBlue "  [节点与协议]"
-    echoContent yellow "    4. 账号与订阅管理 (查看节点 / 订阅链接 / 多用户)"
-    echoContent yellow "    5. REALITY 管理   (一键更换伪装域名 SNI / 重置)"
-    echoContent yellow "    6. Hysteria2 管理 (端口跳跃配置 / 状态查看)"
-    echoContent yellow "    7. TUIC 协议管理  (安装 / 卸载 / 端口跳跃)"
-    echoContent yellow "    8. 端口管理       (全协议端口修改 / 防火墙联动)"
-
-    echoContent skyBlue "  [分流与站点]"
-    echoContent yellow "    9. 智能分流工具   (WARP / IPv6 / Socks5落地 / DNS)"
-    echoContent yellow "   10. 证书与 CDN     (SSL 证书续期 / CDN 优选节点)"
-    echoContent yellow "   11. 伪装站与安全   (更换伪装网站 / 禁 BT / 黑名单)"
-
-    echoContent skyBlue "  [核心与系统]"
-    echoContent yellow "   12. 核心服务管理   (Xray / sing-box 升级 / 预览版 / 日志)"
-    echoContent yellow "   13. BBR 与系统工具 (安装 BBR 加速 / Swap / DD 系统)"
-    echoContent yellow "   14. 更新管理脚本   (从 GitHub 同步最新版本)"
-    echoContent yellow "   15. 卸载管理脚本   (彻底清理所有服务与配置)"
-    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "────────────────────────────────────────────────────────────────"
+    echoContent skyBlue "  [部署与账号]"
+    echoContent yellow "    1. 节点部署与重装  (黄金3件套 / 无域名Reality / 完整 / 自定义)"
+    echoContent yellow "    2. 账号与订阅管理  (查看节点 / 订阅链接 / 多用户)"
+    echoContent skyBlue "\n  [协议与网络]"
+    echoContent yellow "    3. 协议与端口管理  (全协议改端口 / Reality SNI / Hy2跳跃 / TUIC)"
+    echoContent yellow "    4. 智能分流与落地  (WARP / IPv6 / Socks5落地 / DNS)"
+    echoContent yellow "    5. 站点与证书管理  (SSL证书 / CDN优选 / 伪装站 / 禁BT与黑名单)"
+    echoContent skyBlue "\n  [运维与诊断]"
+    echoContent green  "    6. 节点健康自检    (端口实测 / BBR / 证书 / Reality SNI探活)"
+    echoContent yellow "    7. 核心与日志管理  (Xray / sing-box 升级 / 切换核心 / 调试日志)"
+    echoContent yellow "    8. BBR 与系统调优  (安装原版 BBR+FQ / Swap / DD 脚本)"
+    echoContent yellow "    9. 脚本更新与卸载  (同步最新版 / 彻底清理)"
+    echoContent skyBlue "────────────────────────────────────────────────────────────────"
     echoContent skyBlue "    0. 退出脚本"
     echoContent red "================================================================"
     mkdirTools
     aliasInstall
-    read -r -p "请输入选项编号 [0-15]: " selectInstallType
+    read -r -p "请输入选项编号 [0-9]: " selectInstallType
     case ${selectInstallType} in
     0 | "")
         exit 0
         ;;
-    1 | 2 | 3)
-        selectCoreInstall
+    1)
+        deployNodeMenu
         ;;
-    4)
+    2)
         manageAccount 1
         ;;
-    5)
-        manageReality 1
+    3)
+        protocolPortMenu
         ;;
-    6)
-        manageHysteriaPortHopping
-        ;;
-    7)
-        manageTuic
-        ;;
-    8)
-        portManagement
-        ;;
-    9)
+    4)
         routingToolsMenu 1
         ;;
-    10)
-        certCdnMenu
+    5)
+        siteCertMenu
         ;;
-    11)
-        siteSecurityMenu
+    6)
+        nodeHealthCheck
         ;;
-    12)
+    7)
         coreVersionManageMenu 1
         ;;
-    13)
+    8)
         bbrInstall
         ;;
-    14)
-        updateV2RayAgent 1
-        ;;
-    15)
-        unInstall 1
+    9)
+        scriptMaintainMenu
         ;;
     *)
-        echoContent red "\n ---> 输入编号无效，请重新输入 [0-15]"
+        echoContent red "\n ---> 输入编号无效，请重新输入 [0-9]"
         menu
         ;;
     esac

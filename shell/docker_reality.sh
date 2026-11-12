@@ -1618,7 +1618,7 @@ promptExistingInstallAction() {
     fi
 
     echoContent "skyBlue" ""
-    echoContent green "  v2ray-agent (Docker Reality AI修改版)  -  v3.5.41-pr7"
+    echoContent green "  v2ray-agent (Docker Reality AI修改版)  -  v3.5.42-pr1"
     echoContent green "  开源仓库：https://github.com/BG666888/v2ray-agent"
     echoContent green "  快捷命令：vasmad"
     if [[ ${hasConfig} -ne 0 && ${hasContainer} -ne 0 ]]; then
