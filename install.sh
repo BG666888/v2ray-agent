@@ -6971,7 +6971,7 @@ selectAccountUser() {
     local users=$1 count index selected i key
     count=$(jq 'length' <<<"${users}") || return 1
     ((count > 0)) || {
-        echoContent yellow "\n  ---> 没有可查看的用户"
+        uiNoticeMsg="当前没有可查看的用户（请先安装节点或添加账号）"
         return 2
     }
     while :; do
@@ -7468,51 +7468,51 @@ updateNginxBlog() {
     fi
 
     if [[ "${selectInstallNginxBlogType}" == "10" ]]; then
-        uiClear
-        uiHeader "302 重定向网站配置" "配置后根路由将直接 302 跳转至目标站点，优先级高于本地伪装站"
-        uiOption 1 "添加 / 更新 302 重定向" "输入目标重定向 URL，例如 https://www.baidu.com" '\033[92m'
-        uiOption 2 "删除 302 重定向" "恢复使用本地静态伪装站点" '\033[31m'
-        uiBackOption "返回伪装站点菜单"
-        local redirectStatus
-        read -r -p "  请选择 [0-2]: " redirectStatus
+        while :; do
+            uiClear
+            uiHeader "302 重定向网站配置" "配置后根路由将直接 302 跳转至目标站点，优先级高于本地伪装站"
+            uiOption 1 "添加 / 更新 302 重定向" "输入目标重定向 URL，例如 https://www.baidu.com" '\033[92m'
+            uiOption 2 "删除 302 重定向" "恢复使用本地静态伪装站点" '\033[31m'
+            uiBackOption "返回伪装站点菜单"
+            uiConsumeNotice
+            local redirectStatus
+            read -r -p "  请选择 [0-2]: " redirectStatus
 
-        if [[ "${redirectStatus}" == "0" || -z "${redirectStatus}" ]]; then
-            updateNginxBlog 1
-            return 0
-        elif [[ "${redirectStatus}" == "1" ]]; then
-            backupNginxConfig backup
-            read -r -p "  请输入要重定向的域名 (例如 https://www.baidu.com，留空取消): " redirectDomain
-            if [[ -z "${redirectDomain}" ]]; then
+            if [[ "${redirectStatus}" == "0" || -z "${redirectStatus}" ]]; then
                 updateNginxBlog 1
                 return 0
-            fi
-            removeNginx302
-            addNginx302 "${redirectDomain}"
-            handleNginx stop
-            handleNginx start
-            if ! isNginxRunning; then
-                backupNginxConfig restoreBackup
+            elif [[ "${redirectStatus}" == "1" ]]; then
+                backupNginxConfig backup
+                read -r -p "  请输入要重定向的域名 (例如 https://www.baidu.com，留空取消): " redirectDomain
+                if [[ -z "${redirectDomain}" ]]; then
+                    continue
+                fi
+                removeNginx302
+                addNginx302 "${redirectDomain}"
+                handleNginx stop
                 handleNginx start
-                echoContent red "\n  ! Nginx 重启校验失败，已自动回滚原配置"
+                if ! isNginxRunning; then
+                    backupNginxConfig restoreBackup
+                    handleNginx start
+                    echoContent red "\n  ! Nginx 重启校验失败，已自动回滚原配置"
+                    uiDivider gray
+                    uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
+                    return 0
+                fi
+                checkNginx302
                 uiDivider gray
                 uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
                 return 0
+            elif [[ "${redirectStatus}" == "2" ]]; then
+                removeNginx302
+                echoContent green "\n  ---> 移除 302 重定向成功"
+                uiDivider gray
+                uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
+                return 0
+            else
+                uiNoticeMsg="302 菜单输入无效，请输入 0-2"
             fi
-            checkNginx302
-            uiDivider gray
-            uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
-            return 0
-        elif [[ "${redirectStatus}" == "2" ]]; then
-            removeNginx302
-            echoContent green "\n  ---> 移除 302 重定向成功"
-            uiDivider gray
-            uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
-            return 0
-        else
-            uiNoticeMsg="302 菜单输入无效，请输入 0-2"
-            updateNginxBlog 1
-            return 0
-        fi
+        done
     fi
     if [[ "${selectInstallNginxBlogType}" =~ ^[1-9]$ ]]; then
         rm -rf "${nginxStaticPath}*"
@@ -10166,6 +10166,8 @@ warpRoutingReg() {
 
 # 分流工具
 routingToolsMenu() {
+    readInstallType
+    readInstallProtocolType
     uiClear
     uiHeader "智能分流与落地出站" "解锁 AI / 流媒体服务，或将出站流量转发至落地机"
     uiOption 1 "WARP 分流 (IPv4 出站)" "借用 Cloudflare WARP IPv4 解锁受限网站"
@@ -13581,6 +13583,9 @@ addSubscribeMenu() {
         addSubscribeMenu 1
         ;;
     2)
+        if [[ -f "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" ]]; then
+            sed -i '/^$/d' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" >/dev/null 2>&1
+        fi
         if [[ ! -s "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" ]]; then
             echoContent yellow "\n  ---> 暂未添加任何远程外部订阅"
             uiDivider gray
@@ -13588,18 +13593,20 @@ addSubscribeMenu() {
             addSubscribeMenu 1
             return 0
         fi
+        local totalSubCount
+        totalSubCount=$(wc -l < "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" | tr -d '[:space:]')
         printf '\n'
         uiDivider gray
-        grep -v '^$' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" | awk '{print "  "NR": "$0}'
+        awk '{print "  "NR": "$0}' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl"
         uiDivider gray
         local delSubscribeIndex
-        read -r -p "  请选择要删除的订阅编号 [仅支持单个删除，留空取消]: " delSubscribeIndex
-        if [[ -z "${delSubscribeIndex}" ]]; then
+        read -r -p "  请选择要删除的订阅编号 [1-${totalSubCount}，仅支持单个删除，输入 0 或留空取消]: " delSubscribeIndex
+        if [[ "${delSubscribeIndex}" == "0" || -z "${delSubscribeIndex}" ]]; then
             addSubscribeMenu 1
             return 0
         fi
-        if ! [[ "${delSubscribeIndex}" =~ ^[1-9][0-9]*$ ]]; then
-            uiNoticeMsg="输入编号无效，请输入正整数编号"
+        if ! [[ "${delSubscribeIndex}" =~ ^[1-9][0-9]*$ ]] || ((delSubscribeIndex < 1 || delSubscribeIndex > totalSubCount)); then
+            uiNoticeMsg="输入编号无效，请输入 1-${totalSubCount} 之间的整数"
             addSubscribeMenu 1
             return 0
         fi
@@ -14982,7 +14989,8 @@ singBoxVersionManageMenu() {
         case "${selectSingBoxType}" in
         3)
             socks5SingBoxService stop
-            return $?
+            uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
+            return 0
             ;;
         4 | 5)
             /etc/v2ray-agent/sing-box/sing-box check -c /etc/v2ray-agent/sing-box/conf/config.json || return 1
@@ -14990,7 +14998,8 @@ singBoxVersionManageMenu() {
             socks5SingBoxService start || return 1
             sleep 1
             socks5SingBoxService status
-            return $?
+            uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
+            return 0
             ;;
         esac
     fi
@@ -15132,6 +15141,8 @@ renewalTLSMenu() {
 
 # 站点与证书管理综合菜单
 siteCertMenu() {
+    readInstallType
+    readInstallProtocolType
     uiClear
     uiHeader "站点与证书管理" "TLS 证书、优选节点、伪装站点与访问控制"
     uiOption 1 "SSL 证书管理  " "检查证书有效期，临近到期自动续期"
@@ -15191,7 +15202,7 @@ menu() {
 
     uiClear
     echoContent skyBlue "╭──────────────────────────────────────────────────────────────╮"
-    echoContent brightGreen "│  v2ray-agent (修改版) - v3.5.42-pr2         快捷命令: vasma  │"
+    echoContent brightGreen "│  v2ray-agent (修改版) - v3.5.42-pr3         快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
