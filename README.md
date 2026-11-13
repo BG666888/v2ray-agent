@@ -1,4 +1,4 @@
-# v2ray-agent (AI修改版)
+# v2ray-agent (修改版)
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Version: v3.5.42-pr2](https://img.shields.io/badge/Version-v3.5.42--pr2-green.svg)](https://github.com/BG666888/v2ray-agent)
@@ -49,7 +49,7 @@ vasma
 
 ```text
 ╭──────────────────────────────────────────────────────────────╮
-│  v2ray-agent (AI修改版) - v3.5.42-pr2       快捷命令: vasma  │
+│  v2ray-agent (修改版) - v3.5.42-pr2         快捷命令: vasma  │
 ╰──────────────────────────────────────────────────────────────╯
   运行核心 : Xray + sing-box [双核运行中]  |  Nginx: 运行中  |  证书: 剩余 85 天(有效)
   系统环境 : BBR(fq) 已开启  |  域名: example.com  |  Hy2: 纯 BBR

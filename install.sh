@@ -33,7 +33,10 @@ echoContent() {
         ${echoType} "\033[94m${printN}$2 \033[0m"
         ;;
     "gray")
-        ${echoType} "\033[90m${printN}$2 \033[0m"
+        ${echoType} "\033[37m${printN}$2 \033[0m"
+        ;;
+    "cyan")
+        ${echoType} "\033[36m${printN}$2 \033[0m"
         ;;
     "white")
         ${echoType} "\033[37m${printN}$2 \033[0m"
@@ -57,7 +60,8 @@ uiClear() {
 
 # Print a subtle 64-column horizontal divider.
 uiDivider() {
-    local color=${1:-gray}
+    local color=${1:-cyan}
+    [[ "${color}" == "gray" ]] && color="cyan"
     echoContent "${color}" "────────────────────────────────────────────────────────────────"
 }
 
@@ -67,18 +71,18 @@ uiHeader() {
     printf '\n'
     uiDivider skyBlue
     if [[ -n "${subtitle}" ]]; then
-        printf '  \033[1;36m◆ %s\033[0m  \033[90m%s\033[0m\n' "${title}" "${subtitle}"
+        printf '  \033[1;36m◆ %s\033[0m  \033[37m%s\033[0m\n' "${title}" "${subtitle}"
     else
         printf '  \033[1;36m◆ %s\033[0m\n' "${title}"
     fi
-    uiDivider gray
+    uiDivider cyan
 }
 
 # Render a numbered menu row with muted description text.
 uiOption() {
-    local idx=$1 label=$2 hint=${3:-} colorCode=${4:-'\033[37m'}
+    local idx=$1 label=$2 hint=${3:-} colorCode=${4:-'\033[93m'}
     if [[ -n "${hint}" ]]; then
-        printf '  \033[1;36m%s.\033[0m %b%s\033[0m  \033[90m%s\033[0m\n' "${idx}" "${colorCode}" "${label}" "${hint}"
+        printf '  \033[1;36m%s.\033[0m %b%s\033[0m  \033[37m%s\033[0m\n' "${idx}" "${colorCode}" "${label}" "${hint}"
     else
         printf '  \033[1;36m%s.\033[0m %b%s\033[0m\n' "${idx}" "${colorCode}" "${label}"
     fi
@@ -14776,7 +14780,7 @@ menu() {
 
     uiClear
     echoContent skyBlue "╭──────────────────────────────────────────────────────────────╮"
-    echoContent brightGreen "│  v2ray-agent (AI修改版) - v3.5.42-pr2       快捷命令: vasma  │"
+    echoContent brightGreen "│  v2ray-agent (修改版) - v3.5.42-pr2         快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
