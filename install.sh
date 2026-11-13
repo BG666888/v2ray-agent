@@ -47,6 +47,65 @@ echoContent() {
         ;;
     esac
 }
+
+uiNoticeMsg=""
+
+# Clear screen only when running in an interactive terminal.
+uiClear() {
+    [[ -t 1 ]] && command -v clear >/dev/null 2>&1 && clear
+}
+
+# Print a subtle 64-column horizontal divider.
+uiDivider() {
+    local color=${1:-gray}
+    echoContent "${color}" "────────────────────────────────────────────────────────────────"
+}
+
+# Print a unified submenu header with optional muted subtitle.
+uiHeader() {
+    local title=$1 subtitle=${2:-}
+    printf '\n'
+    uiDivider skyBlue
+    if [[ -n "${subtitle}" ]]; then
+        printf '  \033[1;36m◆ %s\033[0m  \033[90m%s\033[0m\n' "${title}" "${subtitle}"
+    else
+        printf '  \033[1;36m◆ %s\033[0m\n' "${title}"
+    fi
+    uiDivider gray
+}
+
+# Render a numbered menu row with muted description text.
+uiOption() {
+    local idx=$1 label=$2 hint=${3:-} colorCode=${4:-'\033[37m'}
+    if [[ -n "${hint}" ]]; then
+        printf '  \033[1;36m%s.\033[0m %b%s\033[0m  \033[90m%s\033[0m\n' "${idx}" "${colorCode}" "${label}" "${hint}"
+    else
+        printf '  \033[1;36m%s.\033[0m %b%s\033[0m\n' "${idx}" "${colorCode}" "${label}"
+    fi
+}
+
+# Render consistent 0-return footer bar.
+uiBackOption() {
+    local text=${1:-返回主菜单}
+    uiDivider gray
+    printf '  \033[1;36m0.\033[0m \033[1;36m%s\033[0m\n' "${text}"
+    uiDivider gray
+}
+
+# Pause cleanly so users never drop out to the shell unexpectedly.
+uiPauseReturn() {
+    local prompt=${1:-按回车键继续...} target=${2:-}
+    read -r -p "${prompt}" _
+    [[ -z "${target}" ]] || "${target}"
+}
+
+# Render and clear any transient validation notice right above the prompt.
+uiConsumeNotice() {
+    if [[ -n "${uiNoticeMsg:-}" ]]; then
+        printf '  \033[31m! %s\033[0m\n' "${uiNoticeMsg}"
+        uiNoticeMsg=""
+    fi
+}
 # 检查SELinux状态
 checkCentosSELinux() {
     if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" == "Enforcing" ]; then
@@ -831,7 +890,9 @@ readInstallProtocolType() {
         fi
         if echo "${row}" | grep -q VLESS_vision_gRPC_inbounds; then
             currentInstallProtocolType="${currentInstallProtocolType}8,"
-            if [[ "${coreInstallType}" == "2" ]]; then
+            if [[ "${coreInstallType}" == "1" ]]; then
+                [[ -z "${xrayVLESSRealityServerName}" ]] && xrayVLESSRealityServerName=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "${row}.json")
+            elif [[ "${coreInstallType}" == "2" ]]; then
                 frontingTypeReality=08_VLESS_vision_gRPC_inbounds
                 singBoxVLESSRealityGRPCPort=$(jq -r .inbounds[0].listen_port "${row}.json")
                 singBoxVLESSRealityGRPCServerName=$(jq -r .inbounds[0].tls.server_name "${row}.json")
@@ -1062,14 +1123,152 @@ checkFirewalldAllowPort() {
     fi
 }
 
+# Return 0 when bandwidth is a positive numeric value; return 1 for 0/empty/invalid.
+isHysteria2SpeedSet() {
+    local val="${1:-0}"
+    [[ "${val}" =~ ^[0-9]+([.][0-9]+)?$ ]] && [[ -n "${val//[0.]/}" ]]
+}
+
+# Format Hysteria2 bandwidth summary label for interactive menus.
+formatHysteria2SpeedLabel() {
+    local down="${1:-0}" up="${2:-0}"
+    if ! isHysteria2SpeedSet "${down}" && ! isHysteria2SpeedSet "${up}"; then
+        printf '不限速 (纯 BBR 自适应)'
+    else
+        local downText upText
+        downText=$(isHysteria2SpeedSet "${down}" && echo "${down} Mbps" || echo "不限速(BBR)")
+        upText=$(isHysteria2SpeedSet "${up}" && echo "${up} Mbps" || echo "不限速(BBR)")
+        printf '下行 %s / 上行 %s (Brutal)' "${downText}" "${upText}"
+    fi
+}
+
+# Synchronize Xray Hysteria2 inbound finalmask.quicParams safely with config test fallback.
+syncXrayHysteria2InboundBandwidth() {
+    local downSpeed=${1:-0} upSpeed=${2:-0} runTest=${3:-test}
+    local xrayHy2File="${configPath:-/etc/v2ray-agent/xray/conf/}06_hysteria2_inbounds.json"
+    [[ -f "${xrayHy2File}" ]] || return 0
+    local tmpFile backupFile testDir
+    tmpFile=$(mktemp "${xrayHy2File}.tmp.XXXXXX") || return 1
+    backupFile=$(mktemp "${xrayHy2File}.bak.XXXXXX") || {
+        rm -f "${tmpFile}"
+        return 1
+    }
+    cp -p "${xrayHy2File}" "${backupFile}" || {
+        rm -f "${tmpFile}" "${backupFile}"
+        return 1
+    }
+
+    if ! jq --arg down "${downSpeed}" --arg up "${upSpeed}" '
+        .inbounds[0].streamSettings |= (
+            if (($down | tonumber) > 0 or ($up | tonumber) > 0) then
+                .finalmask = ((.finalmask // {}) + {
+                    "quicParams": (
+                        ((.finalmask.quicParams // {}) | del(.brutalUp, .brutalDown)) +
+                        (if ($down | tonumber) > 0 then {"brutalUp": ($down + " mbps")} else {} end) +
+                        (if ($up | tonumber) > 0 then {"brutalDown": ($up + " mbps")} else {} end)
+                    )
+                })
+            else
+                if (.finalmask? | type) == "object" then
+                    (.finalmask |= (
+                        if (.quicParams? | type) == "object" then
+                            (.quicParams |= del(.brutalUp, .brutalDown)) |
+                            if (.quicParams | length) == 0 then del(.quicParams) else . end
+                        else . end
+                    )) |
+                    if (.finalmask | length) == 0 then del(.finalmask) else . end
+                else . end
+            end
+        )' "${xrayHy2File}" >"${tmpFile}"; then
+        rm -f "${tmpFile}" "${backupFile}"
+        return 1
+    fi
+
+    local xrayBin=/etc/v2ray-agent/xray/xray
+    if [[ "${runTest}" != "no_test" && -x "${xrayBin}" ]] && { isHysteria2SpeedSet "${downSpeed}" || isHysteria2SpeedSet "${upSpeed}"; }; then
+        testDir=$(mktemp -d "${TMPDIR:-/tmp}/v2ray-agent-hy2test.XXXXXX") || {
+            rm -f "${tmpFile}" "${backupFile}"
+            return 1
+        }
+        if jq -n --slurpfile inb "${tmpFile}" '{log:{loglevel:"none"},inbounds:$inb[0].inbounds,outbounds:[{protocol:"freedom"}]}' >"${testDir}/test.json" 2>/dev/null; then
+            if ! "${xrayBin}" run -test -c "${testDir}/test.json" >/dev/null 2>&1; then
+                rm -rf "${testDir}" "${tmpFile}" "${backupFile}"
+                syncXrayHysteria2InboundBandwidth 0 0 no_test >/dev/null 2>&1 || true
+                return 2
+            fi
+        fi
+        rm -rf "${testDir}"
+    fi
+
+    if ! mv -f "${tmpFile}" "${xrayHy2File}"; then
+        cp -p "${backupFile}" "${xrayHy2File}" >/dev/null 2>&1
+        rm -f "${tmpFile}" "${backupFile}"
+        return 1
+    fi
+    rm -f "${backupFile}"
+    return 0
+}
+
+# Synchronize sing-box Hysteria2 inbound up_mbps/down_mbps safely (0 omits field for BBR).
+syncSingBoxHysteria2InboundBandwidth() {
+    local configFile=$1 downSpeed=${2:-0} upSpeed=${3:-0} runTest=${4:-test}
+    [[ -f "${configFile}" ]] || return 0
+    [[ "${downSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || downSpeed=0
+    [[ "${upSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || upSpeed=0
+    downSpeed=$((10#${downSpeed%%.*}))
+    upSpeed=$((10#${upSpeed%%.*}))
+    local tmpFile backupFile
+    tmpFile=$(mktemp "${configFile}.tmp.XXXXXX") || return 1
+    backupFile=$(mktemp "${configFile}.bak.XXXXXX") || {
+        rm -f "${tmpFile}"
+        return 1
+    }
+    cp -p "${configFile}" "${backupFile}" || {
+        rm -f "${tmpFile}" "${backupFile}"
+        return 1
+    }
+
+    if ! jq --argjson down "${downSpeed:-0}" --argjson up "${upSpeed:-0}" '
+        .inbounds[0] |= (
+            (if $down > 0 then .up_mbps = $down else del(.up_mbps) end) |
+            (if $up > 0 then .down_mbps = $up else del(.down_mbps) end)
+        )' "${configFile}" >"${tmpFile}"; then
+        rm -f "${tmpFile}" "${backupFile}"
+        return 1
+    fi
+
+    if ! mv -f "${tmpFile}" "${configFile}"; then
+        cp -p "${backupFile}" "${configFile}" >/dev/null 2>&1
+        rm -f "${tmpFile}" "${backupFile}"
+        return 1
+    fi
+
+    local sbBin="${singBoxConfigPath%/conf/config/}/sing-box"
+    if [[ "${runTest}" != "no_test" && -n "${singBoxConfigPath}" && -x "${sbBin}" && "${configFile}" == "${singBoxConfigPath}"* ]]; then
+        local tmpCheckDir
+        tmpCheckDir=$(mktemp -d "${TMPDIR:-/tmp}/v2ray-agent-sbcheck.XXXXXX") || tmpCheckDir=""
+        if [[ -n "${tmpCheckDir}" ]]; then
+            if ! "${sbBin}" merge "${tmpCheckDir}/sing-box.json" -C "${singBoxConfigPath}" -D "${singBoxConfigPath%config/}" >/dev/null 2>&1 ||
+               ! "${sbBin}" check -c "${tmpCheckDir}/sing-box.json" -D "${singBoxConfigPath%config/}" >/dev/null 2>&1; then
+                cp -p "${backupFile}" "${configFile}" >/dev/null 2>&1
+                rm -rf "${tmpCheckDir}" "${backupFile}"
+                return 2
+            fi
+            rm -rf "${tmpCheckDir}"
+        fi
+    fi
+    rm -f "${backupFile}"
+    return 0
+}
+
 # Xray client bandwidth hints stay outside the core configuration directory.
 readXrayHysteria2Network() {
     local networkFile=/etc/v2ray-agent/xray/hysteria2_network.json
     hysteria2ClientUploadSpeed=50
     hysteria2ClientDownloadSpeed=100
     [[ -f "${networkFile}" ]] || return 0
-    hysteria2ClientUploadSpeed=$(jq -r '.upload_mbps // 50' "${networkFile}") || return 1
-    hysteria2ClientDownloadSpeed=$(jq -r '.download_mbps // 100' "${networkFile}") || return 1
+    hysteria2ClientUploadSpeed=$(jq -r 'if .upload_mbps == null then 50 else .upload_mbps end' "${networkFile}") || return 1
+    hysteria2ClientDownloadSpeed=$(jq -r 'if .download_mbps == null then 100 else .download_mbps end' "${networkFile}") || return 1
     [[ "${hysteria2ClientUploadSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || hysteria2ClientUploadSpeed=50
     [[ "${hysteria2ClientDownloadSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || hysteria2ClientDownloadSpeed=100
 }
@@ -1100,8 +1299,8 @@ readSingBoxConfig() {
             singBoxHysteria2Port=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}06_hysteria2_inbounds.json")
             if [[ "${coreInstallType}" == "2" || ! -f "${configPath}06_hysteria2_inbounds.json" ]]; then
                 hysteriaPort=${singBoxHysteria2Port}
-                hysteria2ClientUploadSpeed=$(jq -r '.inbounds[0].down_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
-                hysteria2ClientDownloadSpeed=$(jq -r '.inbounds[0].up_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+                hysteria2ClientUploadSpeed=$(jq -r 'if .inbounds[0].down_mbps == null then 0 else .inbounds[0].down_mbps end' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+                hysteria2ClientDownloadSpeed=$(jq -r 'if .inbounds[0].up_mbps == null then 0 else .inbounds[0].up_mbps end' "${singBoxConfigPath}06_hysteria2_inbounds.json")
             fi
         fi
     fi
@@ -1200,6 +1399,10 @@ readConfigHostPathUUID() {
             currentDefaultPort=${currentPort}
             currentUUID=$(jq -r '.inbounds[0].settings.users[0].auth // empty' "${hysteriaConfig}")
             currentClients=$(jq -c '.inbounds[0].settings.users // []' "${hysteriaConfig}")
+        elif [[ -z "${frontingType}" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]] && echo "${currentInstallProtocolType}" | grep -q ",6,"; then
+            currentHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+        elif [[ -z "${frontingType}" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}09_tuic_inbounds.json" ]] && echo "${currentInstallProtocolType}" | grep -q ",9,"; then
+            currentHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}09_tuic_inbounds.json")
         fi
 
         # reality
@@ -1409,11 +1612,40 @@ showInstallStatus() {
             nginxStatusText="未运行"
         fi
 
-        getTlsCertStatus >/dev/null 2>&1
-        echoContent "${coreColor}" "  运行核心 : ${coreStatusText}  |  Nginx: ${nginxStatusText}  |  证书: ${tlsCertSummary}"
-
         # 读取协议类型
         readInstallProtocolType
+
+        if [[ -z "${currentHost}" ]] && ! echo "${currentInstallProtocolType}" | grep -qE ",0,|,1,|,2,|,3,|,4,|,5,|,6,|,9,|,10,|,11,|,13,|,14,"; then
+            tlsCertDomain=""
+            tlsCertSummary="免证书/未配置"
+        else
+            getTlsCertStatus >/dev/null 2>&1
+        fi
+        echoContent "${coreColor}" "  运行核心 : ${coreStatusText}  |  Nginx: ${nginxStatusText}  |  证书: ${tlsCertSummary}"
+
+        local cc qdisc bbrLabel hostLabel hy2ModeTag=""
+        cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+        qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+        if [[ "${cc}" == "bbr" ]]; then
+            bbrLabel="BBR(${qdisc:-fq}) 已开启"
+        else
+            bbrLabel="BBR 未开启"
+        fi
+        if [[ -n "${currentHost}" ]]; then
+            hostLabel="域名: ${currentHost}"
+        elif [[ -n "${tlsCertDomain}" ]]; then
+            hostLabel="域名: ${tlsCertDomain}"
+        else
+            hostLabel="模式: 免域名 Reality"
+        fi
+        if echo "${currentInstallProtocolType}" | grep -q ",6," && declare -F isHysteria2SpeedSet >/dev/null 2>&1; then
+            if isHysteria2SpeedSet "${hysteria2ClientDownloadSpeed}" || isHysteria2SpeedSet "${hysteria2ClientUploadSpeed}"; then
+                hy2ModeTag="  |  Hy2: Brutal(${hysteria2ClientDownloadSpeed:-0}/${hysteria2ClientUploadSpeed:-0}M)"
+            else
+                hy2ModeTag="  |  Hy2: 纯 BBR"
+            fi
+        fi
+        echoContent white "  系统环境 : ${bbrLabel}  |  ${hostLabel}${hy2ModeTag}"
 
         local -a protoList=()
         local p0="${currentPort}" p4="${currentPort}" p6="${xrayHysteria2Port:-${singBoxHysteria2Port}}" p7="${xrayVLESSRealityPort}"
@@ -1444,20 +1676,37 @@ showInstallStatus() {
         if [[ "${currentInstallProtocolType}" == *",20,"* ]]; then protoList+=("SOCKS5(${singBoxSocks5Port})"); fi
 
         if [[ ${#protoList[@]} -gt 0 ]]; then
-            local joinedProtos="" p
+            local lineBuf="" firstLine=true itemCount=0 p
             for p in "${protoList[@]}"; do
-                if [[ -z "${joinedProtos}" ]]; then
-                    joinedProtos="${p}"
+                if [[ -z "${lineBuf}" ]]; then
+                    lineBuf="${p}"
+                    itemCount=1
+                elif ((itemCount < 2 && ${#lineBuf} + ${#p} + 3 <= 50)); then
+                    lineBuf="${lineBuf} | ${p}"
+                    itemCount=$((itemCount + 1))
                 else
-                    joinedProtos="${joinedProtos} | ${p}"
+                    if [[ "${firstLine}" == "true" ]]; then
+                        echoContent yellow "  已装协议 : ${lineBuf}"
+                        firstLine=false
+                    else
+                        echoContent yellow "             ${lineBuf}"
+                    fi
+                    lineBuf="${p}"
+                    itemCount=1
                 fi
             done
-            echoContent yellow "  已装协议 : ${joinedProtos}"
+            if [[ -n "${lineBuf}" ]]; then
+                if [[ "${firstLine}" == "true" ]]; then
+                    echoContent yellow "  已装协议 : ${lineBuf}"
+                else
+                    echoContent yellow "             ${lineBuf}"
+                fi
+            fi
         else
             echoContent yellow "  已装协议 : 暂无"
         fi
     else
-        echoContent yellow "  当前状态 : 尚未安装任何代理核心与协议"
+        echoContent yellow "  当前状态 : 尚未安装任何代理核心与协议（建议先选「1 -> 1」一键部署）"
     fi
 }
 
@@ -3031,25 +3280,32 @@ installXray() {
 
 # xray版本管理
 xrayVersionManageMenu() {
-    echoContent skyBlue "\n========================= Xray-core 管理 ========================="
+    uiClear
     if [[ "${coreInstallType}" != "1" ]]; then
-        echoContent red " ---> 未检测到 Xray-core 安装目录，请先安装 Xray-core"
+        uiHeader "Xray-core 内核管理"
+        echoContent red "  ---> 未检测到 Xray-core 安装目录，请先完成安装"
+        uiDivider gray
+        uiPauseReturn "按回车键返回主菜单..." menu
         return 0
     fi
-    echoContent yellow "  1. 升级 Xray-core 正式版"
-    echoContent yellow "  2. 升级 Xray-core 预览版 (Pre-release)"
-    echoContent yellow "  3. 回退 Xray-core 历史版本"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent yellow "  4. 关闭 Xray-core"
-    echoContent yellow "  5. 启动 Xray-core"
-    echoContent yellow "  6. 重启 Xray-core"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent yellow "  7. 手动更新 GeoSite / GeoIP 规则库"
-    echoContent yellow "  8. 设置每日凌晨自动更新 Geo 规则库"
-    echoContent yellow "  9. 查看 Xray 运行日志"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
+    local xrayVer=""
+    if [[ -x "/etc/v2ray-agent/xray/xray" ]]; then
+        xrayVer=$(/etc/v2ray-agent/xray/xray --version 2>/dev/null | head -n 1 | awk '{print $2}')
+    fi
+    uiHeader "Xray-core 内核管理" "${xrayVer:+当前版本: v${xrayVer#v}}"
+    uiOption "1" "升级 Xray-core 正式版" "(Stable)" '\033[92m'
+    uiOption "2" "升级 Xray-core 预览版" "(Pre-release)"
+    uiOption "3" "回退历史版本" "(最近 5 个正式版)"
+    uiDivider gray
+    uiOption "4" "停止 Xray-core"
+    uiOption "5" "启动 Xray-core"
+    uiOption "6" "重启 Xray-core"
+    uiDivider gray
+    uiOption "7" "立即更新 Geo 规则库" "(GeoSite / GeoIP)"
+    uiOption "8" "配置每日自动更新 Geo 规则"
+    uiOption "9" "运行日志与调试管理"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
     read -r -p "请选择 [0-9]: " selectXrayType
     if [[ "${selectXrayType}" == "0" || -z "${selectXrayType}" ]]; then
         menu
@@ -3057,36 +3313,55 @@ xrayVersionManageMenu() {
     elif [[ "${selectXrayType}" == "1" ]]; then
         prereleaseStatus=false
         updateXray
+        uiPauseReturn "按回车键返回 Xray 管理..."
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "2" ]]; then
         prereleaseStatus=true
         updateXray
+        uiPauseReturn "按回车键返回 Xray 管理..."
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "3" ]]; then
-        echoContent yellow "\n1.只可以回退最近的五个版本"
-        echoContent yellow "2.不保证回退后一定可以正常使用"
-        echoContent yellow "3.如果回退的版本不支持当前的config，则会无法连接，谨慎操作"
-        echoContent skyBlue "------------------------Version-------------------------------"
-        curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50" | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -5 | awk '{print ""NR""":"$0}'
-        echoContent skyBlue "--------------------------------------------------------------"
-        read -r -p "请输入要回退的版本:" selectXrayVersionType
+        echoContent yellow "\n  注意事项："
+        echoContent gray  "    1. 仅支持回退最近 5 个正式版本"
+        echoContent gray  "    2. 若旧版本不支持当前配置格式可能导致无法启动，请谨慎操作"
+        uiDivider skyBlue
+        curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50" | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -5 | awk '{print "  "NR": "$0}'
+        uiDivider gray
+        read -r -p "请输入要回退的序号:" selectXrayVersionType
         version=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50" | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -5 | awk '{print ""NR""":"$0}' | grep "${selectXrayVersionType}:" | awk -F "[:]" '{print $2}')
         if [[ -n "${version}" ]]; then
             updateXray "${version}"
+            uiPauseReturn "按回车键返回 Xray 管理..."
+            xrayVersionManageMenu 1
         else
-            echoContent red "\n ---> 输入有误，请重新输入"
+            uiNoticeMsg="版本号序号有误，请重新选择 [1-5]"
             xrayVersionManageMenu 1
         fi
     elif [[ "${selectXrayType}" == "4" ]]; then
         handleXray stop
+        uiPauseReturn "按回车键返回 Xray 管理..."
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "5" ]]; then
         handleXray start
+        uiPauseReturn "按回车键返回 Xray 管理..."
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "6" ]]; then
         reloadCore
+        uiPauseReturn "按回车键返回 Xray 管理..."
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "7" ]]; then
         updateGeoSite
+        uiPauseReturn "按回车键返回 Xray 管理..."
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "8" ]]; then
         installCronUpdateGeo
+        uiPauseReturn "按回车键返回 Xray 管理..."
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "9" ]]; then
         checkLog 1
+    else
+        uiNoticeMsg="输入编号无效，请输入 [0-9]"
+        xrayVersionManageMenu 1
     fi
 }
 
@@ -3680,20 +3955,37 @@ initHysteriaPort() {
 
 # 初始化hysteria网络信息
 initHysteria2Network() {
+    local defaultDown="${1:-100}" defaultUp="${2:-50}" input
 
-    echoContent yellow "请输入本地带宽峰值的下行速度（默认：100，单位：Mbps）"
-    read -r -p "下行速度:" hysteria2ClientDownloadSpeed
-    if [[ -z "${hysteria2ClientDownloadSpeed}" ]]; then
-        hysteria2ClientDownloadSpeed=100
-        echoContent green "\n ---> 下行速度: ${hysteria2ClientDownloadSpeed}\n"
-    fi
+    echoContent yellow "请输入本地带宽峰值的下行速度（默认：${defaultDown}，填 0 不设置/走 BBR，单位：Mbps）"
+    while true; do
+        read -r -p "下行速度:" input
+        if [[ -z "${input}" ]]; then
+            hysteria2ClientDownloadSpeed="${defaultDown}"
+            break
+        elif [[ "${input}" =~ ^[0-9]+$ ]]; then
+            hysteria2ClientDownloadSpeed="$((10#${input}))"
+            break
+        else
+            echoContent red " ---> 输入不合法，请输入非负整数（填 0 表示不设置/走 BBR）"
+        fi
+    done
+    echoContent green "\n ---> 下行速度: $([[ "${hysteria2ClientDownloadSpeed}" == "0" ]] && echo "不设置 (BBR 自适应)" || echo "${hysteria2ClientDownloadSpeed} Mbps")\n"
 
-    echoContent yellow "请输入本地带宽峰值的上行速度（默认：50，单位：Mbps）"
-    read -r -p "上行速度:" hysteria2ClientUploadSpeed
-    if [[ -z "${hysteria2ClientUploadSpeed}" ]]; then
-        hysteria2ClientUploadSpeed=50
-        echoContent green "\n ---> 上行速度: ${hysteria2ClientUploadSpeed}\n"
-    fi
+    echoContent yellow "请输入本地带宽峰值的上行速度（默认：${defaultUp}，填 0 不设置/走 BBR，单位：Mbps）"
+    while true; do
+        read -r -p "上行速度:" input
+        if [[ -z "${input}" ]]; then
+            hysteria2ClientUploadSpeed="${defaultUp}"
+            break
+        elif [[ "${input}" =~ ^[0-9]+$ ]]; then
+            hysteria2ClientUploadSpeed="$((10#${input}))"
+            break
+        else
+            echoContent red " ---> 输入不合法，请输入非负整数（填 0 表示不设置/走 BBR）"
+        fi
+    done
+    echoContent green "\n ---> 上行速度: $([[ "${hysteria2ClientUploadSpeed}" == "0" ]] && echo "不设置 (BBR 自适应)" || echo "${hysteria2ClientUploadSpeed} Mbps")\n"
 }
 
 # Port hopping rules are owned per protocol; never flush another firewall's rules.
@@ -4082,10 +4374,16 @@ removeAllPortHopping() {
 buildSingBoxHysteria2Node() {
     local port=$1 email=$2 password=$3
     local listenPort=${hysteriaPort}
+    local up="${hysteria2ClientUploadSpeed:-0}" down="${hysteria2ClientDownloadSpeed:-0}"
+    [[ "${up}" =~ ^[0-9]+([.][0-9]+)?$ ]] || up=0
+    [[ "${down}" =~ ^[0-9]+([.][0-9]+)?$ ]] || down=0
     jq -n --arg port "${port}" --arg tag "${email}" --arg password "${password}" --arg host "${currentHost}" \
-        --argjson listenPort "${listenPort}" --argjson up "${hysteria2ClientUploadSpeed}" \
-        --argjson down "${hysteria2ClientDownloadSpeed}" --arg interval "${hysteria2HopInterval:-60}s" \
-        '{tag:$tag,type:"hysteria2",server:$host,up_mbps:$up,down_mbps:$down,password:$password,tls:{enabled:true,server_name:$host,alpn:["h3"]}} +
+        --argjson listenPort "${listenPort}" --argjson up "${up}" \
+        --argjson down "${down}" --arg interval "${hysteria2HopInterval:-60}s" \
+        '{tag:$tag,type:"hysteria2",server:$host} +
+        (if $up > 0 then {up_mbps:$up} else {} end) +
+        (if $down > 0 then {down_mbps:$down} else {} end) +
+        {password:$password,tls:{enabled:true,server_name:$host,alpn:["h3"]}} +
         (if $port | contains("-") then {server_ports:[($port | sub("-"; ":"))],hop_interval:$interval} else {server_port:$listenPort} end)'
 }
 
@@ -4184,14 +4482,189 @@ portHoppingMenu() {
     fi
 }
 
+# Refresh local links and published subscriptions after Hysteria2 network/port changes.
+refreshHysteria2Subscriptions() {
+    readInstallType
+    readInstallProtocolType
+    readConfigHostPathUUID >/dev/null 2>&1
+    readCustomPort >/dev/null 2>&1
+    readSingBoxConfig >/dev/null 2>&1
+    readNginxSubscribe
+    if [[ -n "${subscribePort}" && -s "/etc/v2ray-agent/subscribe_local/subscribeSalt" ]]; then
+        echoContent skyBlue " ---> 正在同步刷新订阅链接..."
+        subscribe false false >/dev/null 2>&1
+        echoContent green " ---> 远程与本地订阅已自动刷新"
+    else
+        showAccounts 1 >/dev/null 2>&1 || true
+        echoContent green " ---> 本地账号分享配置已刷新（可在主菜单「2. 账号与订阅管理」查看最新链接）"
+    fi
+}
+
+# Apply updated Hysteria2 expected bandwidth to owning core and refresh subscriptions.
+applyHysteria2Bandwidth() {
+    local downSpeed=${1:-0} upSpeed=${2:-0}
+    hysteria2ClientDownloadSpeed="${downSpeed}"
+    hysteria2ClientUploadSpeed="${upSpeed}"
+    readInstallType
+    readInstallProtocolType
+
+    if [[ "${coreInstallType}" == "1" && -f "${configPath}06_hysteria2_inbounds.json" ]]; then
+        saveXrayHysteria2Network || {
+            echoContent red " ---> 保存 Xray Hysteria2 带宽配置失败"
+            return 1
+        }
+        local xrayHy2File="${configPath}06_hysteria2_inbounds.json"
+        local preBackup rc=0
+        preBackup=$(mktemp "${TMPDIR:-/tmp}/v2ray-agent-hy2bak.XXXXXX") || return 1
+        cp -p "${xrayHy2File}" "${preBackup}" || {
+            rm -f "${preBackup}"
+            return 1
+        }
+        syncXrayHysteria2InboundBandwidth "${downSpeed}" "${upSpeed}" || rc=$?
+        if [[ ${rc} -eq 2 ]]; then
+            rm -f "${preBackup}"
+            echoContent yellow " ---> 当前 Xray-core 版本不支持 finalmask.quicParams，服务端继续保持 BBR，仅将期望带宽写入客户端订阅"
+        elif [[ ${rc} -ne 0 ]]; then
+            cp -p "${preBackup}" "${xrayHy2File}" >/dev/null 2>&1
+            rm -f "${preBackup}"
+            echoContent red " ---> 更新 Xray Hysteria2 配置失败，已回滚原配置"
+            return 1
+        else
+            if ! cmp -s "${preBackup}" "${xrayHy2File}"; then
+                echoContent skyBlue " ---> 正在热重载 Xray-core 服务..."
+                if ! reloadCore transaction xray; then
+                    cp -p "${preBackup}" "${xrayHy2File}" >/dev/null 2>&1
+                    reloadCore transaction xray >/dev/null 2>&1
+                    rm -f "${preBackup}"
+                    echoContent red " ---> Xray-core 重载失败，已自动回滚原配置"
+                    return 1
+                fi
+            fi
+            rm -f "${preBackup}"
+        fi
+    elif [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
+        local sbHy2File="${singBoxConfigPath}06_hysteria2_inbounds.json"
+        local preBackup rc=0
+        preBackup=$(mktemp "${TMPDIR:-/tmp}/v2ray-agent-sbhy2bak.XXXXXX") || return 1
+        cp -p "${sbHy2File}" "${preBackup}" || {
+            rm -f "${preBackup}"
+            return 1
+        }
+        syncSingBoxHysteria2InboundBandwidth "${sbHy2File}" "${downSpeed}" "${upSpeed}" || rc=$?
+        if [[ ${rc} -ne 0 ]]; then
+            rm -f "${preBackup}"
+            echoContent red " ---> sing-box Hysteria2 配置校验失败，已保留原配置"
+            return 1
+        fi
+        if [[ -f "${singBoxConfigPath}hysteria2.json" ]]; then
+            syncSingBoxHysteria2InboundBandwidth "${singBoxConfigPath}hysteria2.json" "${downSpeed}" "${upSpeed}" no_test || true
+        fi
+        if ! cmp -s "${preBackup}" "${sbHy2File}"; then
+            echoContent skyBlue " ---> 正在热重载 sing-box 服务..."
+            if ! reloadCore transaction sing-box; then
+                cp -p "${preBackup}" "${sbHy2File}" >/dev/null 2>&1
+                reloadCore transaction sing-box >/dev/null 2>&1
+                rm -f "${preBackup}"
+                echoContent red " ---> sing-box 重载失败，已自动回滚原配置"
+                return 1
+            fi
+        fi
+        rm -f "${preBackup}"
+    else
+        echoContent red " ---> 未找到可用的 Hysteria2 入站配置文件"
+        return 1
+    fi
+
+    refreshHysteria2Subscriptions
+    echoContent green "\n ---> Hysteria2 带宽策略已更新为: $(formatHysteria2SpeedLabel "${downSpeed}" "${upSpeed}")"
+    if ! isHysteria2SpeedSet "${downSpeed}" && ! isHysteria2SpeedSet "${upSpeed}"; then
+        echoContent yellow " ---> 客户端更新订阅后，mihomo / sing-box / Xray 均将走 BBR 自适应拥塞控制"
+    else
+        echoContent yellow " ---> 客户端更新订阅后生效（非 0 方向采用 Brutal，填 0 方向采用 BBR）"
+    fi
+}
+
 manageHysteriaPortHopping() {
+    uiClear
     readInstallType
     readInstallProtocolType
     if ! echo "${currentInstallProtocolType}" | grep -q ',6,'; then
-        echoContent yellow " ---> 未检测到Hysteria2入站"
+        uiHeader "Hysteria2 协议管理"
+        echoContent yellow "  ---> 未检测到已安装的 Hysteria2 入站协议"
+        uiDivider gray
+        uiPauseReturn "按回车键返回主菜单..." menu
         return 0
     fi
-    portHoppingMenu hysteria2
+    readSingBoxConfig || return 1
+    local targetPort=${hysteriaPort}
+    local ownerCore="Xray-core"
+    if [[ "${coreInstallType}" == "2" || ! -f "${configPath}06_hysteria2_inbounds.json" ]]; then
+        ownerCore="sing-box"
+    fi
+
+    uiHeader "Hysteria2 协议管理" "承载核心: ${ownerCore}"
+    local hoppingBackend hoppingStart hoppingEnd hoppingTarget hoppingInterval hoppingFamilies hoppingZone
+    if loadPortHoppingConfig hysteria2 "${targetPort}"; then
+        echoContent green  "  端口状态 : 端口跳跃已启用 (${hoppingStart}-${hoppingEnd} -> UDP ${hoppingTarget} | ${hoppingBackend})"
+    else
+        echoContent yellow "  端口状态 : 单端口监听 (UDP ${targetPort}，未启用端口跳跃)"
+    fi
+    echoContent green  "  期望带宽 : $(formatHysteria2SpeedLabel "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}")"
+    uiDivider gray
+    uiOption "1" "启用端口跳跃" "(多端口随机轮换抗 UDP QoS)"
+    uiOption "2" "移除端口跳跃" "(恢复单端口直连监听)"
+    uiOption "3" "查看跳跃详情" "(查看转发规则与跳跃间隔)"
+    uiDivider gray
+    uiOption "4" "自定义期望带宽" "(设置上/下行 Mbps，填 0 走 BBR)" '\033[92m'
+    uiOption "5" "一键切换纯 BBR" "(设为 0/0 不限速，客户端与服务端均走 BBR)" '\033[92m'
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
+    local selectHy2Action
+    read -r -p "请选择 [0-5]: " selectHy2Action
+    case "${selectHy2Action}" in
+    0 | "")
+        menu
+        ;;
+    1)
+        if addPortHopping hysteria2 "${targetPort}"; then
+            readPortHopping hysteria2 "${targetPort}"
+            refreshHysteria2Subscriptions
+        fi
+        uiPauseReturn "按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        ;;
+    2)
+        if deletePortHoppingRules hysteria2 '' '' "${targetPort}"; then
+            echoContent green " ---> 删除成功"
+            readPortHopping hysteria2 "${targetPort}"
+            refreshHysteria2Subscriptions
+        else
+            echoContent red " ---> 删除失败，已保留配置以便重试"
+        fi
+        uiPauseReturn "按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        ;;
+    3)
+        if loadPortHoppingConfig hysteria2 "${targetPort}"; then
+            echoContent green " ---> 当前范围: ${hoppingStart}-${hoppingEnd}，转发端口: ${hoppingTarget}，防火墙: ${hoppingBackend}"
+            echoContent green " ---> 跳跃间隔: ${hoppingInterval}秒"
+        else
+            echoContent yellow " ---> 未设置端口跳跃"
+        fi
+        uiPauseReturn "按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        ;;
+    4)
+        initHysteria2Network "${hysteria2ClientDownloadSpeed:-100}" "${hysteria2ClientUploadSpeed:-50}"
+        applyHysteria2Bandwidth "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}"
+        uiPauseReturn "按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        ;;
+    5)
+        applyHysteria2Bandwidth 0 0
+        uiPauseReturn "按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        ;;
+    *)
+        uiNoticeMsg="输入编号无效，请输入 [0-5]"
+        manageHysteriaPortHopping
+        ;;
+    esac
 }
 
 # 初始化tuic端口
@@ -4656,8 +5129,6 @@ initSingBoxHysteria2Config() {
             "listen": "::",
             "listen_port": ${hysteriaPort},
             "users": $(initXrayClients 6),
-            "up_mbps":${hysteria2ClientDownloadSpeed},
-            "down_mbps":${hysteria2ClientUploadSpeed},
             "tls": {
                 "enabled": true,
                 "server_name":"${currentHost}",
@@ -4671,6 +5142,7 @@ initSingBoxHysteria2Config() {
     ]
 }
 EOF
+    syncSingBoxHysteria2InboundBandwidth "/etc/v2ray-agent/sing-box/conf/config/hysteria2.json" "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}" no_test || return 1
 }
 
 # sing-box Tuic安装
@@ -5169,6 +5641,13 @@ EOF
   }]
 }
 EOF
+        local xrayHy2Rc=0
+        syncXrayHysteria2InboundBandwidth "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}" || xrayHy2Rc=$?
+        if [[ ${xrayHy2Rc} -eq 2 ]]; then
+            echoContent yellow " ---> 当前 Xray-core 版本不支持 finalmask.quicParams，服务端继续保持 BBR，仅将期望带宽写入客户端订阅"
+        elif [[ ${xrayHy2Rc} -ne 0 ]]; then
+            return 1
+        fi
     elif [[ -z "$3" ]]; then
         rm -f /etc/v2ray-agent/xray/conf/06_hysteria2_inbounds.json
         rm -f /etc/v2ray-agent/xray/hysteria2_network.json
@@ -5715,8 +6194,6 @@ EOF
             "listen": "::",
             "listen_port": ${result[-1]},
             "users": $(initSingBoxClients 6),
-            "up_mbps":${hysteria2ClientDownloadSpeed},
-            "down_mbps":${hysteria2ClientUploadSpeed},
             "tls": {
                 "enabled": true,
                 "server_name":"${sslDomain}",
@@ -5730,6 +6207,7 @@ EOF
     ]
 }
 EOF
+        syncSingBoxHysteria2InboundBandwidth "/etc/v2ray-agent/sing-box/conf/config/06_hysteria2_inbounds.json" "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}" no_test || return 1
     elif [[ -z "$3" ]]; then
         rm /etc/v2ray-agent/sing-box/conf/config/06_hysteria2_inbounds.json >/dev/null 2>&1
     fi
@@ -6152,8 +6630,16 @@ EOF
         local multiPort=
         local multiPortEncode
         local uriPort=${port}
-        local speedParams="upmbps=${hysteria2ClientUploadSpeed}&downmbps=${hysteria2ClientDownloadSpeed}&"
-        local speedParamsEncode="upmbps%3D${hysteria2ClientUploadSpeed}%26downmbps%3D${hysteria2ClientDownloadSpeed}%26"
+        local speedParams=
+        local speedParamsEncode=
+        if isHysteria2SpeedSet "${hysteria2ClientUploadSpeed}"; then
+            speedParams="${speedParams}upmbps=${hysteria2ClientUploadSpeed}&"
+            speedParamsEncode="${speedParamsEncode}upmbps%3D${hysteria2ClientUploadSpeed}%26"
+        fi
+        if isHysteria2SpeedSet "${hysteria2ClientDownloadSpeed}"; then
+            speedParams="${speedParams}downmbps=${hysteria2ClientDownloadSpeed}&"
+            speedParamsEncode="${speedParamsEncode}downmbps%3D${hysteria2ClientDownloadSpeed}%26"
+        fi
         if echo "${port}" | grep -q "-"; then
             clashMetaPortContent="ports: \"${port}\"
     hop-interval: ${hysteria2HopInterval:-60}"
@@ -6181,9 +6667,13 @@ EOF
     alpn:
         - h3
     sni: ${currentHost}
-    up: "${hysteria2ClientUploadSpeed} Mbps"
-    down: "${hysteria2ClientDownloadSpeed} Mbps"
 EOF
+        if isHysteria2SpeedSet "${hysteria2ClientUploadSpeed}"; then
+            printf '    up: "%s Mbps"\n' "${hysteria2ClientUploadSpeed}" >>"${outputRoot}/clashMeta/${user}" || return 1
+        fi
+        if isHysteria2SpeedSet "${hysteria2ClientDownloadSpeed}"; then
+            printf '    down: "%s Mbps"\n' "${hysteria2ClientDownloadSpeed}" >>"${outputRoot}/clashMeta/${user}" || return 1
+        fi
 
         local hysteria2Node
         hysteria2Node=$(buildSingBoxHysteria2Node "${port}" "${email}" "${id}") || return 1
@@ -7276,13 +7766,14 @@ appendExtraHealthPort() {
 
 # 节点健康自检面板
 nodeHealthCheck() {
+    uiClear
     readInstallType
     readInstallProtocolType
     readConfigHostPathUUID
     readSingBoxConfig >/dev/null 2>&1
     readNginxSubscribe >/dev/null 2>&1
 
-    echoContent skyBlue "\n========================= 节点健康自检面板 ========================="
+    uiHeader "节点健康自检面板" "5 维实时体检"
 
     # 1. 核心进程与内存占用
     echoContent yellow "  [1/5] 核心进程与服务状态"
@@ -7449,7 +7940,7 @@ nodeHealthCheck() {
         echoContent white "    本机防火墙 : 无活跃 ufw/firewalld 或由 iptables/nftables 托管"
     fi
 
-    echoContent red "=================================================================="
+    uiDivider gray
     read -r -p "按回车键返回主菜单..." _
     menu
 }
@@ -8325,17 +8816,27 @@ handleFirewall() {
 
 # 安装BBR
 bbrInstall() {
-    echoContent red "\n=============================================================="
-    echoContent green "BBR、DD脚本用的[ylx2016]的成熟作品，地址[https://github.com/ylx2016/Linux-NetSpeed]，请熟知"
-    echoContent yellow "  1. 安装 BBR / 内核加速脚本【推荐原版 BBR+FQ】"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "=============================================================="
-    read -r -p "请选择 [0-1]:" installBBRStatus
-    if [[ "${installBBRStatus}" == "1" ]]; then
+    uiClear
+    uiHeader "BBR 内核拥塞控制与加速" "推荐选择原版 BBR + FQ 队列算法"
+    echoContent gray "  第三方内核管理脚本由 ylx2016 维护 (github.com/ylx2016/Linux-NetSpeed)"
+    uiDivider gray
+    uiOption 1 "安装 / 切换 BBR 内核加速" "按脚本提示选择原版 BBR + FQ 即可" '\033[92m'
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
+    read -r -p "  请选择 [0-1]: " installBBRStatus
+    case "${installBBRStatus}" in
+    1)
         wget -O tcpx.sh "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh
-    else
+        uiPauseReturn "  按回车键返回主菜单..." menu
+        ;;
+    0 | "")
         menu
-    fi
+        ;;
+    *)
+        uiNoticeMsg="输入无效，请输入 0 或 1"
+        bbrInstall
+        ;;
+    esac
 }
 
 # 查看、检查日志
@@ -9437,19 +9938,17 @@ warpRoutingReg() {
 
 # 分流工具
 routingToolsMenu() {
-    echoContent skyBlue "\n========================= 智能分流工具 ========================="
-    echoContent yellow "说明：用于服务端出站流量分流，可解锁 ChatGPT / 流媒体或挂载落地机"
-    echoContent red "================================================================"
-    echoContent yellow "  1. WARP 分流 (第三方 IPv4 出站)"
-    echoContent yellow "  2. WARP 分流 (第三方 IPv6 出站)"
-    echoContent yellow "  3. IPv6 路由分流"
-    echoContent yellow "  4. Socks5 分流 (挂载落地机 / 独立入站)"
-    echoContent yellow "  5. DNS 解锁分流"
-    echoContent yellow "  6. SNI 反向代理分流"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
-    read -r -p "请选择 [0-6]: " selectType
+    uiClear
+    uiHeader "智能分流与落地出站" "解锁 AI / 流媒体服务，或将出站流量转发至落地机"
+    uiOption 1 "WARP 分流 (IPv4 出站)" "借用 Cloudflare WARP IPv4 解锁受限网站"
+    uiOption 2 "WARP 分流 (IPv6 出站)" "为指定域名走 WARP IPv6 出站"
+    uiOption 3 "IPv6 原生路由分流" "指定域名优先走本机原生 IPv6 出口"
+    uiOption 4 "Socks5 分流与入站" "对接外部落地机，或开启独立 Socks5 入站"
+    uiOption 5 "DNS 解锁分流" "将特定域名交由解锁 DNS 解析"
+    uiOption 6 "SNI 反向代理分流" "仅支持 Xray-core（不支持 Hysteria2 / TUIC）"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
+    read -r -p "  请选择 [0-6]: " selectType
 
     case ${selectType} in
     0 | "")
@@ -9472,9 +9971,13 @@ routingToolsMenu() {
         ;;
     6 | 7)
         if [[ -n "${singBoxConfigPath}" ]]; then
-            echoContent red "\n ---> 此功能不支持Hysteria2、Tuic"
+            echoContent red "\n  ! 此功能不支持 Hysteria2 / TUIC"
         fi
         sniRouting 1
+        ;;
+    *)
+        uiNoticeMsg="输入无效，请输入 0-6 之间的数字"
+        routingToolsMenu
         ;;
     esac
 }
@@ -12251,20 +12754,20 @@ runCustomXrayInstall() {
 
 # 黄金抗封锁 3 件套一键部署 (,0,6,7,)
 installGoldenTrio() {
-    echoContent skyBlue "\n===================== 黄金抗封锁 3 件套预设 ====================="
+    uiClear
+    uiHeader "黄金抗封锁 3 件套预设" "全自动零冲突端口分配"
     echoContent green  "  协议组合 : VLESS+Reality[Vision] + Hysteria2 + VLESS+TCP[TLS_Vision]"
-    echoContent yellow "  零冲突端口自动分配:"
-    echoContent white  "    • VLESS+Reality(Vision)  -> TCP 443  (主力抗封锁 / 免TLS防探测)"
-    echoContent white  "    • Hysteria2 (QUIC)       -> UDP 443  (弱网/高丢包高速通道)"
+    echoContent white  "    • VLESS+Reality(Vision)  -> TCP 443  (主力抗封锁 / 免自有证书防探测)"
+    echoContent white  "    • Hysteria2 (QUIC)       -> UDP 443  (高丢包弱网高速通道)"
     echoContent white  "    • VLESS+TCP(TLS_Vision)  -> TCP 8443 (伪装站点回落兜底)"
-    echoContent yellow "  提示：部署前请准备 1 个已解析到本机的域名（用于 Hy2 与 Vision TLS）"
-    echoContent red "================================================================"
-    echoContent yellow "  1. Xray-core 单核部署 (推荐，单进程原生直跑三大协议)"
-    echoContent yellow "  2. sing-box 核心部署"
-    echoContent skyBlue "  0. 返回部署菜单"
-    echoContent red "================================================================"
+    echoContent gray   "  部署前请准备 1 个已解析到本机的域名（用于 Hysteria2 与 Vision TLS）"
+    uiDivider gray
+    uiOption 1 "Xray-core 单核部署" "单进程原生直跑三大协议 [推荐]" '\033[92m'
+    uiOption 2 "sing-box 核心部署" "由 sing-box 原生承载三大协议"
+    uiBackOption "返回部署菜单"
+    uiConsumeNotice
     local trioCoreChoice rc=0
-    read -r -p "请选择部署核心 [0-2]: " trioCoreChoice
+    read -r -p "  请选择部署核心 [0-2]: " trioCoreChoice
 
     case "${trioCoreChoice}" in
     1)
@@ -12287,7 +12790,7 @@ installGoldenTrio() {
         deployNodeMenu
         ;;
     *)
-        echoContent red " ---> 输入无效，请重新选择"
+        uiNoticeMsg="输入无效，请输入 0-2"
         installGoldenTrio
         ;;
     esac
@@ -12295,12 +12798,13 @@ installGoldenTrio() {
 
 # 选择核心安装sing-box、xray-core
 selectCoreInstall() {
-    echoContent skyBlue "\n========================= 选择安装核心 ========================="
-    echoContent yellow "  1. Xray-core  (推荐 Reality / XHTTP / Vision 高性能组合)"
-    echoContent yellow "  2. sing-box   (推荐 Hysteria2 / TUIC / 多协议全能核心)"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
-    read -r -p "请选择 [0-2]: " selectCoreType
+    uiClear
+    uiHeader "选择部署核心" "不同核心擅长的协议与生态各有侧重"
+    uiOption 1 "Xray-core" "擅长 Reality / XHTTP / Vision 高性能组合 [推荐]" '\033[92m'
+    uiOption 2 "sing-box" "擅长 Hysteria2 / TUIC / 多协议原生全能支持"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
+    read -r -p "  请选择 [0-2]: " selectCoreType
     case ${selectCoreType} in
     0 | "")
         menu
@@ -12324,7 +12828,7 @@ selectCoreInstall() {
         fi
         ;;
     *)
-        echoContent red ' ---> 选择错误，请重新选择'
+        uiNoticeMsg="输入无效，请输入 0-2"
         selectCoreInstall
         ;;
     esac
@@ -12418,15 +12922,17 @@ singBoxInstall() {
 # 核心管理
 coreVersionManageMenu() {
     if [[ -z "${coreInstallType}" && -z "${singBoxConfigPath}" ]]; then
-        echoContent red "\n ---> 未检测到任何已安装的核心，请先执行安装！"
+        echoContent red "\n  ! 未检测到任何已安装的核心，请先部署节点"
+        uiPauseReturn "  按回车键返回主菜单..." menu
         return 0
     fi
-    echoContent skyBlue "\n========================= 核心服务管理 ========================="
-    echoContent yellow "  1. Xray-core 管理 (升级正式版/预览版/回退/启停/Geo规则/日志)"
-    echoContent yellow "  2. sing-box 管理  (升级正式版/预览版/启停/日志)"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
-    read -r -p "请选择 [0-2]: " selectCore
+    uiClear
+    uiHeader "核心版本与服务管理" "升级 / 回退 / 启停 / 规则与日志"
+    uiOption 1 "Xray-core 管理" "升级正式版或预览版、回退、启停、Geo 规则与日志" '\033[92m'
+    uiOption 2 "sing-box 管理" "升级正式版或预览版、版本切换、启停与日志"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
+    read -r -p "  请选择 [0-2]: " selectCore
 
     if [[ "${selectCore}" == "1" ]]; then
         xrayVersionManageMenu 1
@@ -12434,6 +12940,9 @@ coreVersionManageMenu() {
         singBoxVersionManageMenu 1
     elif [[ "${selectCore}" == "0" || -z "${selectCore}" ]]; then
         menu
+    else
+        uiNoticeMsg="输入无效，请输入 0-2"
+        coreVersionManageMenu
     fi
 }
 # 定时任务检查
@@ -12453,28 +12962,28 @@ cronFunction() {
 # 账号管理
 manageAccount() {
     if [[ "${currentInstallProtocolType}" == ",20," ]]; then
-        echoContent yellow " ---> 仅安装 SOCKS5 入站，请通过 Socks5 入站菜单管理配置"
+        echoContent yellow "\n  ! 当前仅部署 Socks5 独立入站，请通过「分流与落地 -> Socks5」管理"
+        uiPauseReturn "  按回车键返回主菜单..." menu
         return 1
     fi
     if [[ -z "${configPath}" ]]; then
-        echoContent red "\n ---> 未检测到已安装的协议配置，请先安装！"
+        echoContent red "\n  ! 未检测到已部署的节点配置，请先安装节点"
+        uiPauseReturn "  按回车键返回主菜单..." menu
         return 0
     fi
 
-    echoContent skyBlue "\n======================== 账号与订阅管理 ========================"
-    echoContent yellow "提示：添加/删除用户会自动同步到所有已安装的协议与订阅中"
-    echoContent red "================================================================"
-    echoContent yellow "  1. 查看节点账号 (连接链接 / 订阅详情)"
-    echoContent yellow "  2. 查看用户订阅 (通用 Base64 / Clash.Meta / sing-box)"
-    echoContent yellow "  3. 生成/更新订阅 (重新生成全部用户订阅)"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent yellow "  4. 添加新用户   (支持自定义 email 与 UUID)"
-    echoContent yellow "  5. 删除已有用户"
-    echoContent yellow "  6. 远程订阅合并 (添加/管理其他外部订阅)"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
-    read -r -p "请选择 [0-6]: " manageAccountStatus
+    uiClear
+    uiHeader "账号与订阅管理" "增删用户会自动同步至所有已部署协议"
+    uiOption 1 "查看节点连接与详情" "按用户查看各协议链接与配置参数" '\033[92m'
+    uiOption 2 "导出用户订阅链接" "支持通用 Base64 / Clash.Meta / sing-box"
+    uiOption 3 "刷新全部用户订阅" "变更端口、域名或参数后建议重新生成"
+    uiDivider gray
+    uiOption 4 "添加新用户" "支持自定义用户名与 UUID"
+    uiOption 5 "删除已有用户" "从服务端配置与订阅中移除"
+    uiOption 6 "合并远程外部订阅" "将其他节点订阅聚合进当前用户订阅"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
+    read -r -p "  请选择 [0-6]: " manageAccountStatus
     case "${manageAccountStatus}" in
     0 | "")
         menu
@@ -12498,7 +13007,8 @@ manageAccount() {
         addSubscribeMenu 1
         ;;
     *)
-        echoContent red " ---> 选择错误"
+        uiNoticeMsg="输入无效，请输入 0-6 之间的数字"
+        manageAccount
         ;;
     esac
 }
@@ -13702,7 +14212,11 @@ manageReality() {
     readSingBoxConfig
 
     if ! echo "${currentInstallProtocolType}" | grep -q -E "7,|8,|12," || [[ -z "${coreInstallType}" ]]; then
-        echoContent red "\n ---> 未检测到已安装的 Reality 协议！"
+        uiClear
+        uiHeader "REALITY 协议管理"
+        echoContent red "\n  ! 未检测到已安装的 Reality 协议"
+        uiDivider gray
+        uiPauseReturn "  按回车键返回主菜单..." menu
         return 0
     fi
 
@@ -13736,55 +14250,62 @@ manageReality() {
         curPublicKey="${singBoxVLESSRealitygRPCPublicKey}"
     fi
 
-    echoContent skyBlue "\n=========================== REALITY 管理 ==========================="
-    echoContent yellow "当前 Reality 配置概览："
-    echoContent green  "  - 伪装域名 (SNI)   : ${curSni:-未知}"
-    echoContent green  "  - 目标端口 (Target): ${curTargetPort:-443}"
-    [[ -n "${curPublicKey}" ]] && echoContent green "  - 公钥 (PublicKey) : ${curPublicKey}"
-    echoContent red "===================================================================="
-    echoContent yellow "1. 更换伪装域名 (SNI)"
-    echoContent yellow "2. 完整重新配置 Reality (重新生成密钥/配置)"
-    echoContent skyBlue "0. 返回主菜单"
-    echoContent red "===================================================================="
+    uiClear
+    uiHeader "REALITY 协议管理" "伪装域名、回落目标与密钥配置"
+    echoContent green "  伪装域名 (SNI)    : ${curSni:-未知}"
+    echoContent green "  目标端口 (Target) : ${curTargetPort:-443}"
+    [[ -n "${curPublicKey}" ]] && echoContent gray "  公钥 (PublicKey)  : ${curPublicKey}"
+    uiDivider gray
+    uiOption 1 "更换伪装域名 (SNI)" "修改 SNI 与目标端口并同步更新订阅" '\033[92m'
+    uiOption 2 "重置密钥与配置" "重新生成 Reality 密钥对并重建节点配置"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
 
     local selectRealityManageType
-    read -r -p "请选择 [0-2]: " selectRealityManageType
+    read -r -p "  请选择 [0-2]: " selectRealityManageType
 
     case "${selectRealityManageType}" in
+    0 | "")
+        menu
+        ;;
     1)
-        echoContent skyBlue "\n----------------------- 更换伪装域名 (SNI) -----------------------"
-        echoContent yellow "常用推荐 SNI 参考："
-        echoContent green  "  1. www.samsung.com"
-        echoContent green  "  2. aws.amazon.com"
-        echo
+        printf '\n'
+        uiDivider skyBlue
+        echoContent skyBlue "  ◆ 更换伪装域名 (SNI)"
+        uiDivider gray
+        echoContent gray "  常用推荐 SNI（输入序号可快速选用，或直接输入自定义域名）:"
+        uiOption 1 "www.samsung.com" "三星官网（TLSv1.3 / X25519 兼容性佳）" '\033[92m'
+        uiOption 2 "aws.amazon.com" "亚马逊云（大厂站点，适欧美/全局链路）"
+        uiDivider gray
         local newSni
-        read -r -p "请输入新的伪装域名 [直接输入数字 1-2 可快速选择，也可输入自定义域名]: " newSni
+        read -r -p "  请输入新 SNI 或序号 [1-2，留空返回]: " newSni
 
         case "${newSni}" in
+        "")
+            manageReality
+            return 0
+            ;;
         1) newSni="www.samsung.com" ;;
         2) newSni="aws.amazon.com" ;;
         esac
 
-        if [[ -z "${newSni}" ]]; then
-            echoContent red " ---> 伪装域名不能为空！"
-            return 1
-        fi
-
         # 域名合法性粗校验
         if ! [[ "${newSni}" =~ ^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}$ ]]; then
-            echoContent red " ---> 域名格式不正确: ${newSni}"
+            uiNoticeMsg="域名格式不正确: ${newSni}"
+            manageReality
             return 1
         fi
 
         local newTargetPort
-        read -r -p "请输入目标回落端口 [回车默认 443]: " newTargetPort
+        read -r -p "  目标回落端口 [回车默认 443]: " newTargetPort
         newTargetPort=${newTargetPort:-443}
         if ! [[ "${newTargetPort}" =~ ^[0-9]{1,5}$ ]] || ((newTargetPort < 1 || newTargetPort > 65535)); then
-            echoContent red " ---> 目标端口必须是 1 到 65535 之间数字！"
+            uiNoticeMsg="目标端口必须是 1-65535 之间的数字"
+            manageReality
             return 1
         fi
 
-        echoContent skyBlue "\n ---> 正在更新 Reality 配置文件..."
+        echoContent skyBlue "\n  ---> 正在更新 Reality 配置..."
         local target="${newSni}:${newTargetPort}"
 
         # 1. Xray 07_VLESS_vision_reality_inbounds.json
@@ -13849,7 +14370,7 @@ manageReality() {
                 "${file}" > "${file}.tmp" && mv -f "${file}.tmp" "${file}"
         fi
 
-        echoContent skyBlue " ---> 正在重启服务并同步更新订阅..."
+        echoContent skyBlue "  ---> 正在重启服务并同步更新订阅..."
         reloadCore
         readInstallType
         readInstallProtocolType
@@ -13861,30 +14382,41 @@ manageReality() {
             subscribe false false >/dev/null 2>&1
         fi
 
-        echoContent green "\n================================================================"
-        echoContent green " ---> 成功！Reality 伪装域名已更改为: ${newSni} (目标: ${target})"
-        echoContent green " ---> 服务已重启，订阅已自动同步更新！"
-        echoContent yellow " ---> 请在客户端（v2rayNG / Clash）点击【更新订阅】即可立即生效。"
-        echoContent green "================================================================\n"
+        printf '\n'
+        uiDivider green
+        echoContent brightGreen "  ✓ Reality 伪装域名已更新为: ${newSni} (目标: ${target})"
+        echoContent white "    • 核心已重载，订阅链接已自动同步"
+        echoContent gray  "    • 请在客户端（v2rayNG / Clash / Mihomo）点击更新订阅生效"
+        uiDivider green
+        uiPauseReturn "  按回车键返回 REALITY 管理..." manageReality
         ;;
     2)
+        selectCustomInstallType=""
         if [[ "${coreInstallType}" == "1" ]]; then
-            selectCustomInstallType=",7,"
+            if echo "${currentInstallProtocolType}" | grep -q ",7,"; then
+                selectCustomInstallType=",7,"
+            fi
+            if echo "${currentInstallProtocolType}" | grep -q ",12,"; then
+                selectCustomInstallType="${selectCustomInstallType:-,}12,"
+            fi
+            [[ -z "${selectCustomInstallType}" ]] && selectCustomInstallType=",7,"
             initXrayConfig custom 1 true
         elif [[ "${coreInstallType}" == "2" ]]; then
             if echo "${currentInstallProtocolType}" | grep -q ",7,"; then
                 selectCustomInstallType=",7,"
             fi
             if echo "${currentInstallProtocolType}" | grep -q ",8,"; then
-                selectCustomInstallType="${selectCustomInstallType},8,"
+                selectCustomInstallType="${selectCustomInstallType:-,}8,"
             fi
             initSingBoxConfig custom 1 true || return 1
         fi
         reloadCore
         subscribe false
+        uiPauseReturn "  按回车键返回 REALITY 管理..." manageReality
         ;;
     *)
-        return 0
+        uiNoticeMsg="输入无效，请输入 0-2"
+        manageReality
         ;;
     esac
 }
@@ -13938,23 +14470,24 @@ realityScanner() {
 }
 # tuic管理
 manageTuic() {
-    echoContent skyBlue "\n========================= TUIC 协议管理 ========================="
+    uiClear
+    uiHeader "TUIC 协议管理" "基于 sing-box 内核的高速 QUIC 协议"
     local tuicStatus=
     if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/v2ray-agent/sing-box/conf/config/09_tuic_inbounds.json" ]]; then
         echoContent green "  当前状态 : 已安装 (基于 sing-box 内核)"
-        echoContent red "================================================================"
-        echoContent yellow "  1. 重新安装 TUIC"
-        echoContent yellow "  2. 卸载 TUIC"
-        echoContent yellow "  3. TUIC 端口跳跃管理"
+        uiDivider gray
+        uiOption 1 "重新安装 TUIC" "重建 TUIC 配置与监听端口"
+        uiOption 2 "卸载 TUIC    " "移除 TUIC 入站与相关规则" '\033[31m'
+        uiOption 3 "端口跳跃管理 " "配置或查看 TUIC 多端口跳跃" '\033[92m'
         tuicStatus=true
     else
         echoContent yellow "  当前状态 : 未安装 (依赖 sing-box 内核)"
-        echoContent red "================================================================"
-        echoContent yellow "  1. 安装 TUIC"
+        uiDivider gray
+        uiOption 1 "安装 TUIC    " "在 sing-box 中新增 TUIC 入站" '\033[92m'
     fi
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
-    read -r -p "请选择: " installTuicStatus
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
+    read -r -p "  请选择: " installTuicStatus
     if [[ "${installTuicStatus}" == "0" || -z "${installTuicStatus}" ]]; then
         menu
     elif [[ "${installTuicStatus}" == "1" ]]; then
@@ -13963,6 +14496,9 @@ manageTuic() {
         unInstallSingBox tuic
     elif [[ "${installTuicStatus}" == "3" && "${tuicStatus}" == "true" ]]; then
         portHoppingMenu tuic
+    else
+        uiNoticeMsg="输入编号无效，请重新选择"
+        manageTuic
     fi
 }
 # sing-box log日志
@@ -13990,40 +14526,47 @@ EOF
 # sing-box 版本管理
 singBoxVersionManageMenu() {
     if [[ -z "${singBoxConfigPath}" ]]; then
-        echoContent red "\n ---> 未检测到 sing-box 安装目录，请先安装 sing-box"
+        uiClear
+        uiHeader "sing-box 核心管理"
+        echoContent red "\n  ! 未检测到 sing-box 安装目录，请先安装 sing-box"
+        uiDivider gray
+        uiPauseReturn "  按回车键返回主菜单..." menu
         return 0
     fi
     local sbVer=""
     if [[ -x "/etc/v2ray-agent/sing-box/sing-box" ]]; then
         sbVer=$(/etc/v2ray-agent/sing-box/sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
     fi
-    echoContent skyBlue "\n======================== sing-box 管理 ========================"
-    [[ -n "${sbVer}" ]] && echoContent green "  当前版本 : ${sbVer}"
-    echoContent red "================================================================"
-    echoContent yellow "  1. 升级 sing-box 正式版 (Stable)"
-    echoContent yellow "  2. 升级 sing-box 预览版 (Pre-release / 1.15+)"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent yellow "  3. 关闭 sing-box"
-    echoContent yellow "  4. 启动 sing-box"
-    echoContent yellow "  5. 重启 sing-box"
-    echoContent skyBlue "----------------------------------------------------------------"
+    uiClear
+    uiHeader "sing-box 核心管理" "${sbVer:+当前版本: ${sbVer}}"
+    uiOption 1 "升级 sing-box 正式版" "稳定发布通道 (Stable)" '\033[92m'
+    uiOption 2 "升级 sing-box 预览版" "新特性测试通道 (Pre-release / 1.15+)"
+    uiDivider gray
+    uiOption 3 "关闭 sing-box" "停止当前运行进程"
+    uiOption 4 "启动 sing-box" "启动 sing-box 服务"
+    uiOption 5 "重启 sing-box" "重载配置并重启服务"
+    uiDivider gray
     local logStatus=
     if [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}log.json" && "$(jq -r .log.disabled "${singBoxConfigPath}log.json")" == "false" ]]; then
-        echoContent yellow "  6. 关闭调试日志"
+        uiOption 6 "关闭调试日志" "停止写入 debug 级别日志"
         logStatus=true
     else
-        echoContent yellow "  6. 启用调试日志"
+        uiOption 6 "启用调试日志" "开启 debug 级别日志用于排障"
         logStatus=false
     fi
 
-    echoContent yellow "  7. 实时查看日志"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
+    uiOption 7 "实时查看日志" "持续输出 box.log（按 Ctrl+C 退出）"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
 
-    read -r -p "请选择 [0-7]: " selectSingBoxType
+    read -r -p "  请选择 [0-7]: " selectSingBoxType
     if [[ "${selectSingBoxType}" == "0" || -z "${selectSingBoxType}" ]]; then
         menu
+        return 0
+    fi
+    if ! [[ "${selectSingBoxType}" =~ ^[1-7]$ ]]; then
+        uiNoticeMsg="输入无效，请输入 0-7 之间的数字"
+        singBoxVersionManageMenu
         return 0
     fi
     if [[ ! -f "${singBoxConfigPath}../box.log" ]]; then
@@ -14055,6 +14598,7 @@ singBoxVersionManageMenu() {
             handleSingBox stop
             handleSingBox start
         fi
+        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "2" ]]; then
         prereleaseStatus=true
         installSingBox 1 || return 1
@@ -14065,13 +14609,17 @@ singBoxVersionManageMenu() {
             handleSingBox stop
             handleSingBox start
         fi
+        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "3" ]]; then
         handleSingBox stop
+        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "4" ]]; then
         handleSingBox start
+        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "5" ]]; then
         handleSingBox stop
         handleSingBox start
+        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "6" ]]; then
         singBoxLog ${logStatus}
         if [[ "${logStatus}" == "false" ]]; then
@@ -14084,20 +14632,20 @@ singBoxVersionManageMenu() {
 
 # 节点部署与重装子菜单
 deployNodeMenu() {
-    echoContent skyBlue "\n======================= 节点部署与重装 ======================="
-    echoContent green  "  1. 黄金抗封锁 3 件套 [推荐] (Reality + Hy2 + Vision 零冲突预设)"
-    echoContent yellow "  2. 一键无域名安装         (Reality 免域名极速部署)"
+    uiClear
+    uiHeader "节点部署与重装" "按需选择预设方案或自定义协议组合"
+    uiOption 1 "黄金抗封锁 3 件套" "Reality + Hysteria2 + Vision 零冲突预设 [推荐]" '\033[92m'
+    uiOption 2 "一键无域名安装" "仅部署 Reality 系列，无需域名与证书"
     if [[ -n "${coreInstallType}" ]]; then
-        echoContent yellow "  3. 重新完整安装           (带域名全套协议)"
+        uiOption 3 "重新完整安装" "使用自有域名部署全套主流协议"
     else
-        echoContent yellow "  3. 完整安装               (带域名全套协议)"
+        uiOption 3 "完整安装      " "使用自有域名部署全套主流协议"
     fi
-    echoContent yellow "  4. 自定义组合安装         (按需勾选指定协议)"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
+    uiOption 4 "自定义组合安装" "自由勾选所需协议与核心"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
     local selDeploy
-    read -r -p "请选择 [0-4]: " selDeploy
+    read -r -p "  请选择 [0-4]: " selDeploy
     case "${selDeploy}" in
     1) installGoldenTrio ;;
     2)
@@ -14114,7 +14662,7 @@ deployNodeMenu() {
         ;;
     0 | "") menu ;;
     *)
-        echoContent red " ---> 输入编号无效，请重新输入 [0-4]"
+        uiNoticeMsg="输入编号无效，请输入 0-4"
         deployNodeMenu
         ;;
     esac
@@ -14122,16 +14670,38 @@ deployNodeMenu() {
 
 # 协议与端口管理子菜单
 protocolPortMenu() {
-    echoContent skyBlue "\n======================= 协议与端口管理 ======================="
-    echoContent yellow "  1. 端口管理       (全协议端口修改 / 防火墙联动 / 订阅刷新)"
-    echoContent yellow "  2. REALITY 管理   (一键更换伪装域名 SNI / 密钥重置)"
-    echoContent yellow "  3. Hysteria2 管理 (端口跳跃配置 / 状态查看)"
-    echoContent yellow "  4. TUIC 协议管理  (安装 / 卸载 / 端口跳跃)"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
+    readInstallType
+    readInstallProtocolType
+    readSingBoxConfig >/dev/null 2>&1
+    uiClear
+    uiHeader "协议与端口管理" "调整监听端口、伪装域名或单协议运行参数"
+    local realityHint="(切换伪装域名 SNI / 重置 Reality 密钥)"
+    if echo "${currentInstallProtocolType}" | grep -q -E "7,|8,|12,"; then
+        local activeSni="${xrayVLESSRealityServerName:-${xrayVLESSRealityXHTTPServerName:-${singBoxVLESSRealityVisionServerName:-${singBoxVLESSRealityGRPCServerName:-}}}}"
+        [[ -n "${activeSni}" ]] && realityHint="[当前 SNI: ${activeSni}] 更换伪装域名或重置密钥"
+    fi
+    local hy2Hint="(端口跳跃 / 期望带宽与 BBR 切换)"
+    if echo "${currentInstallProtocolType}" | grep -q ",6,"; then
+        local hy2DisplayPort="${hysteriaPort:-${xrayHysteria2Port:-${singBoxHysteria2Port:-443}}}"
+        if ! isHysteria2SpeedSet "${hysteria2ClientDownloadSpeed}" && ! isHysteria2SpeedSet "${hysteria2ClientUploadSpeed}"; then
+            hy2Hint="[当前: 纯 BBR | UDP ${hy2DisplayPort}] 端口跳跃或配置 Brutal 速率"
+        else
+            hy2Hint="[当前: Brutal ${hysteria2ClientDownloadSpeed:-0}/${hysteria2ClientUploadSpeed:-0}M | UDP ${hy2DisplayPort}] 端口跳跃或切换 BBR"
+        fi
+    fi
+    local tuicHint="(安装 / 卸载 / 端口跳跃)"
+    if echo "${currentInstallProtocolType}" | grep -q ",9," && [[ -n "${singBoxTuicPort:-}" ]]; then
+        tuicHint="[当前: UDP ${singBoxTuicPort}] 协议管理与端口跳跃"
+    fi
+
+    uiOption 1 "全局端口管理  " "批量修改已装协议端口，联动防火墙与订阅"
+    uiOption 2 "REALITY 管理  " "${realityHint}"
+    uiOption 3 "Hysteria2 管理" "${hy2Hint}" '\033[92m'
+    uiOption 4 "TUIC 协议管理 " "${tuicHint}"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
     local selProto
-    read -r -p "请选择 [0-4]: " selProto
+    read -r -p "  请选择 [0-4]: " selProto
     case "${selProto}" in
     1) portManagement ;;
     2) manageReality 1 ;;
@@ -14139,7 +14709,7 @@ protocolPortMenu() {
     4) manageTuic ;;
     0 | "") menu ;;
     *)
-        echoContent red " ---> 输入编号无效，请重新输入 [0-4]"
+        uiNoticeMsg="输入编号无效，请输入 0-4"
         protocolPortMenu
         ;;
     esac
@@ -14147,18 +14717,18 @@ protocolPortMenu() {
 
 # 站点与证书管理综合菜单
 siteCertMenu() {
-    echoContent skyBlue "\n======================= 站点与证书管理 ======================="
-    echoContent yellow "  1. SSL 证书管理   (手动更新证书 / 切换证书机构)"
-    echoContent yellow "  2. CDN 优选节点   (添加/管理 Cloudflare 等优选域名或 IP)"
-    echoContent yellow "  3. 切换 TLS ALPN  (自定义 ALPN 协商策略)"
-    echoContent yellow "  4. 更换伪装站点   (10 款内置静态模板 / 302 跳转)"
-    echoContent yellow "  5. BT 与高危端口  (封禁 BT 下载与高危端口)"
-    echoContent yellow "  6. 域名黑名单     (访问控制与域名屏蔽管理)"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
+    uiClear
+    uiHeader "站点与证书管理" "TLS 证书、优选节点、伪装站点与访问控制"
+    uiOption 1 "SSL 证书管理  " "手动申请 / 续期证书或切换签发机构"
+    uiOption 2 "CDN 优选节点  " "添加或管理 Cloudflare 等优选域名 / IP"
+    uiOption 3 "切换 TLS ALPN " "自定义 TLS ALPN 协商策略"
+    uiOption 4 "更换伪装站点  " "10 款内置静态模板或外部 302 跳转"
+    uiOption 5 "BT 与高危端口 " "阻断 BT 下载流量与常见高危端口"
+    uiOption 6 "域名黑名单管理" "屏蔽指定域名出站访问"
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
     local selSiteCert
-    read -r -p "请选择 [0-6]: " selSiteCert
+    read -r -p "  请选择 [0-6]: " selSiteCert
     case "${selSiteCert}" in
     1) renewalTLS 1 ;;
     2) manageCDN 1 ;;
@@ -14168,7 +14738,7 @@ siteCertMenu() {
     6) blacklist 1 ;;
     0 | "") menu ;;
     *)
-        echoContent red " ---> 输入编号无效，请重新输入 [0-6]"
+        uiNoticeMsg="输入编号无效，请输入 0-6"
         siteCertMenu
         ;;
     esac
@@ -14176,20 +14746,20 @@ siteCertMenu() {
 
 # 脚本更新与卸载子菜单
 scriptMaintainMenu() {
-    echoContent skyBlue "\n======================= 脚本更新与卸载 ======================="
-    echoContent yellow "  1. 更新管理脚本   (从 GitHub 同步最新版本)"
-    echoContent red    "  2. 卸载管理脚本   (彻底清理所有服务与配置)"
-    echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
-    echoContent red "================================================================"
+    uiClear
+    uiHeader "脚本更新与卸载" "同步远程仓库最新版本或卸载清理本地组件"
+    uiOption 1 "更新管理脚本  " "从 GitHub 同步最新版本" '\033[92m'
+    uiOption 2 "卸载管理脚本  " "删除组件、服务与规则（保留已有 TLS 证书）" '\033[31m'
+    uiBackOption "返回主菜单"
+    uiConsumeNotice
     local selMaint
-    read -r -p "请选择 [0-2]: " selMaint
+    read -r -p "  请选择 [0-2]: " selMaint
     case "${selMaint}" in
     1) updateV2RayAgent 1 ;;
     2) unInstall 1 ;;
     0 | "") menu ;;
     *)
-        echoContent red " ---> 输入编号无效，请重新输入 [0-2]"
+        uiNoticeMsg="输入编号无效，请输入 0-2"
         scriptMaintainMenu
         ;;
     esac
@@ -14204,30 +14774,32 @@ menu() {
     readCustomPort >/dev/null 2>&1
     readSingBoxConfig >/dev/null 2>&1
 
-    echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
-    echoContent green   "│  v2ray-agent (AI修改版) - v3.5.42-pr1       快捷命令: vasma  │"
+    uiClear
+    echoContent skyBlue "╭──────────────────────────────────────────────────────────────╮"
+    echoContent brightGreen "│  v2ray-agent (AI修改版) - v3.5.42-pr2       快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
-    echoContent skyBlue "────────────────────────────────────────────────────────────────"
-    echoContent skyBlue "  [部署与账号]"
-    echoContent yellow "    1. 节点部署与重装  (黄金3件套 / 无域名Reality / 完整 / 自定义)"
-    echoContent yellow "    2. 账号与订阅管理  (查看节点 / 订阅链接 / 多用户)"
-    echoContent skyBlue "\n  [协议与网络]"
-    echoContent yellow "    3. 协议与端口管理  (全协议改端口 / Reality SNI / Hy2跳跃 / TUIC)"
-    echoContent yellow "    4. 智能分流与落地  (WARP / IPv6 / Socks5落地 / DNS)"
-    echoContent yellow "    5. 站点与证书管理  (SSL证书 / CDN优选 / 伪装站 / 禁BT与黑名单)"
-    echoContent skyBlue "\n  [运维与诊断]"
-    echoContent green  "    6. 节点健康自检    (端口实测 / BBR / 证书 / Reality SNI探活)"
-    echoContent yellow "    7. 核心与日志管理  (Xray / sing-box 升级 / 切换核心 / 调试日志)"
-    echoContent yellow "    8. BBR 与系统调优  (安装原版 BBR+FQ / Swap / DD 脚本)"
-    echoContent yellow "    9. 脚本更新与卸载  (同步最新版 / 彻底清理)"
-    echoContent skyBlue "────────────────────────────────────────────────────────────────"
-    echoContent skyBlue "    0. 退出脚本"
-    echoContent red "================================================================"
+    uiDivider gray
+    echoContent skyBlue "  [ 部署与账号 ]"
+    uiOption 1 "节点部署与重装" "黄金3件套 / 无域名 Reality / 完整 / 自定义"
+    uiOption 2 "账号与订阅管理" "查看节点连接 / 多格式订阅 / 增删用户"
+    printf '\n'
+    echoContent skyBlue "  [ 协议与网络 ]"
+    uiOption 3 "协议与端口管理" "端口修改 / Reality SNI / Hy2 带宽与 BBR"
+    uiOption 4 "智能分流与落地" "WARP 出站 / IPv6 / Socks5 落地 / DNS"
+    uiOption 5 "站点与证书管理" "SSL 证书 / CDN 优选 / 伪装站 / 安全规则"
+    printf '\n'
+    echoContent skyBlue "  [ 运维与诊断 ]"
+    uiOption 6 "节点健康自检  " "端口实测 / BBR 状态 / 证书 / Reality 探活" '\033[92m'
+    uiOption 7 "核心与日志管理" "Xray / sing-box 升降级 / 启停 / 调试日志"
+    uiOption 8 "BBR 与系统调优" "安装原版 BBR+FQ / Swap / 系统优化"
+    uiOption 9 "脚本更新与卸载" "同步 GitHub 最新版 / 卸载清理组件"
+    uiBackOption "退出脚本"
+    uiConsumeNotice
     mkdirTools
     aliasInstall
-    read -r -p "请输入选项编号 [0-9]: " selectInstallType
+    read -r -p "  请选择 [0-9]: " selectInstallType
     case ${selectInstallType} in
     0 | "")
         exit 0
@@ -14260,7 +14832,7 @@ menu() {
         scriptMaintainMenu
         ;;
     *)
-        echoContent red "\n ---> 输入编号无效，请重新输入 [0-9]"
+        uiNoticeMsg="输入编号无效，请输入 0-9"
         menu
         ;;
     esac
