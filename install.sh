@@ -3179,6 +3179,8 @@ xrayVersionManageMenu() {
     echoContent skyBlue "\n========================= Xray-core 管理 ========================="
     if [[ "${coreInstallType}" != "1" ]]; then
         echoContent red " ---> 未检测到 Xray-core 安装目录，请先安装 Xray-core"
+        read -r -p "按回车键返回核心服务管理..." _
+        coreVersionManageMenu 1
         return 0
     fi
     echoContent yellow "  1. 升级 Xray-core 正式版"
@@ -3193,18 +3195,22 @@ xrayVersionManageMenu() {
     echoContent yellow "  8. 设置每日凌晨自动更新 Geo 规则库"
     echoContent yellow "  9. 查看 Xray 运行日志"
     echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
+    echoContent skyBlue "  0. 返回核心服务管理"
     echoContent red "================================================================"
     read -r -p "请选择 [0-9]: " selectXrayType
     if [[ "${selectXrayType}" == "0" || -z "${selectXrayType}" ]]; then
-        menu
+        coreVersionManageMenu 1
         return 0
     elif [[ "${selectXrayType}" == "1" ]]; then
         prereleaseStatus=false
         updateXray
+        read -r -p "按回车键返回 Xray-core 管理..." _
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "2" ]]; then
         prereleaseStatus=true
         updateXray
+        read -r -p "按回车键返回 Xray-core 管理..." _
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "3" ]]; then
         echoContent yellow "\n1.只可以回退最近的五个版本"
         echoContent yellow "2.不保证回退后一定可以正常使用"
@@ -3216,22 +3222,37 @@ xrayVersionManageMenu() {
         version=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50" | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -5 | awk '{print ""NR""":"$0}' | grep "${selectXrayVersionType}:" | awk -F "[:]" '{print $2}')
         if [[ -n "${version}" ]]; then
             updateXray "${version}"
+            read -r -p "按回车键返回 Xray-core 管理..." _
+            xrayVersionManageMenu 1
         else
             echoContent red "\n ---> 输入有误，请重新输入"
             xrayVersionManageMenu 1
         fi
     elif [[ "${selectXrayType}" == "4" ]]; then
         handleXray stop
+        read -r -p "按回车键返回 Xray-core 管理..." _
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "5" ]]; then
         handleXray start
+        read -r -p "按回车键返回 Xray-core 管理..." _
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "6" ]]; then
         reloadCore
+        read -r -p "按回车键返回 Xray-core 管理..." _
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "7" ]]; then
         updateGeoSite
+        read -r -p "按回车键返回 Xray-core 管理..." _
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "8" ]]; then
         installCronUpdateGeo
+        read -r -p "按回车键返回 Xray-core 管理..." _
+        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "9" ]]; then
         checkLog 1
+    else
+        echoContent red "\n ---> 输入编号无效，请重新输入 [0-9]"
+        xrayVersionManageMenu 1
     fi
 }
 
@@ -4318,38 +4339,62 @@ portHoppingMenu() {
     echoContent yellow "  1. 添加端口跳跃"
     echoContent yellow "  2. 删除端口跳跃"
     echoContent yellow "  3. 查看端口跳跃详情"
-    echoContent skyBlue "  0. 返回主菜单"
+    if [[ "${type}" == "tuic" ]]; then
+        echoContent skyBlue "  0. 返回 TUIC 协议管理"
+    else
+        echoContent skyBlue "  0. 返回协议与端口管理"
+    fi
     echoContent red "================================================================"
     read -r -p "请选择 [0-3]: " selectPortHoppingStatus
     case "${selectPortHoppingStatus}" in
     0 | "")
+        if [[ "${type}" == "tuic" ]]; then
+            manageTuic
+        else
+            protocolPortMenu
+        fi
         return 0
         ;;
-    1) addPortHopping "${type}" "${targetPort}" || return 1 ;;
+    1)
+        if addPortHopping "${type}" "${targetPort}"; then
+            readPortHopping "${type}" "${targetPort}"
+            readNginxSubscribe
+            if [[ -n "${subscribePort}" ]]; then
+                subscribe false
+            fi
+        fi
+        read -r -p "按回车键返回端口跳跃管理..." _
+        portHoppingMenu "${type}"
+        ;;
     2)
-        deletePortHoppingRules "${type}" '' '' "${targetPort}" || {
+        if deletePortHoppingRules "${type}" '' '' "${targetPort}"; then
+            echoContent green " ---> 删除成功"
+            readPortHopping "${type}" "${targetPort}"
+            readNginxSubscribe
+            if [[ -n "${subscribePort}" ]]; then
+                subscribe false
+            fi
+        else
             echoContent red " ---> 删除失败，已保留配置以便重试"
-            return 1
-        }
-        echoContent green " ---> 删除成功"
+        fi
+        read -r -p "按回车键返回端口跳跃管理..." _
+        portHoppingMenu "${type}"
         ;;
     3)
-        local hoppingBackend hoppingStart hoppingEnd hoppingTarget hoppingInterval hoppingFamilies hoppingZone
         if loadPortHoppingConfig "${type}" "${targetPort}"; then
             echoContent green " ---> 当前范围: ${hoppingStart}-${hoppingEnd}，转发端口: ${hoppingTarget}，防火墙: ${hoppingBackend}"
             [[ "${type}" != hysteria2 ]] || echoContent green " ---> 跳跃间隔: ${hoppingInterval}秒"
         else
             echoContent yellow " ---> 未设置端口跳跃"
         fi
-        return 0
+        read -r -p "按回车键返回端口跳跃管理..." _
+        portHoppingMenu "${type}"
         ;;
-    *) return 0 ;;
+    *)
+        echoContent red " ---> 输入编号无效，请重新输入 [0-3]"
+        portHoppingMenu "${type}"
+        ;;
     esac
-    readPortHopping "${type}" "${targetPort}"
-    readNginxSubscribe
-    if [[ -n "${subscribePort}" ]]; then
-        subscribe false
-    fi
 }
 
 refreshHysteria2Subscriptions() {
@@ -4449,9 +4494,15 @@ manageHysteriaPortHopping() {
     readInstallProtocolType
     if ! echo "${currentInstallProtocolType}" | grep -q ',6,'; then
         echoContent yellow " ---> 未检测到Hysteria2入站"
+        read -r -p "按回车键返回协议与端口管理..." _
+        protocolPortMenu
         return 0
     fi
-    readSingBoxConfig || return 1
+    readSingBoxConfig || {
+        read -r -p "按回车键返回协议与端口管理..." _
+        protocolPortMenu
+        return 0
+    }
     local targetPort=${hysteriaPort}
     local ownerCore="Xray-core"
     if [[ "${coreInstallType}" == "2" || ! -f "${configPath}06_hysteria2_inbounds.json" ]]; then
@@ -4482,6 +4533,7 @@ manageHysteriaPortHopping() {
             readPortHopping hysteria2 "${targetPort}"
             refreshHysteria2Subscriptions
         fi
+        read -r -p "按回车键返回 Hysteria2 管理..." _
         manageHysteriaPortHopping
         ;;
     2)
@@ -4492,19 +4544,29 @@ manageHysteriaPortHopping() {
         else
             echoContent red " ---> 删除失败，已保留配置以便重试"
         fi
+        read -r -p "按回车键返回 Hysteria2 管理..." _
         manageHysteriaPortHopping
         ;;
     3)
-        showPortHopping hysteria2 "${targetPort}"
+        local hoppingBackend hoppingStart hoppingEnd hoppingTarget hoppingInterval hoppingFamilies hoppingZone
+        if loadPortHoppingConfig hysteria2 "${targetPort}"; then
+            echoContent green " ---> 当前范围: ${hoppingStart}-${hoppingEnd}，转发端口: ${hoppingTarget}，防火墙: ${hoppingBackend}"
+            echoContent green " ---> 跳跃间隔: ${hoppingInterval}秒"
+        else
+            echoContent yellow " ---> 未设置端口跳跃 (当前单端口监听 UDP ${targetPort})"
+        fi
+        read -r -p "按回车键返回 Hysteria2 管理..." _
         manageHysteriaPortHopping
         ;;
     4)
         initHysteria2Network "${hysteria2ClientDownloadSpeed:-100}" "${hysteria2ClientUploadSpeed:-50}"
         applyHysteria2Bandwidth "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}"
+        read -r -p "按回车键返回 Hysteria2 管理..." _
         manageHysteriaPortHopping
         ;;
     5)
         applyHysteria2Bandwidth 0 0
+        read -r -p "按回车键返回 Hysteria2 管理..." _
         manageHysteriaPortHopping
         ;;
     *)
@@ -7244,14 +7306,18 @@ addNginx302() {
 updateNginxBlog() {
     if [[ "${coreInstallType}" == "2" ]]; then
         echoContent red "\n ---> 此功能仅支持Xray-core内核"
-        exit 0
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
+        return 0
     fi
 
     echoContent skyBlue "\n进度 $1/${totalProgress} : 更换伪装站点"
 
     if ! echo "${currentInstallProtocolType}" | grep -q ",0," || [[ -z "${coreInstallType}" ]]; then
         echoContent red "\n ---> 由于环境依赖，请先安装Xray-core的VLESS_TCP_TLS_Vision"
-        exit 0
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
+        return 0
     fi
     echoContent red "=============================================================="
     echoContent yellow "# 如需自定义，请手动复制模版文件到 ${nginxStaticPath} \n"
@@ -7336,9 +7402,11 @@ updateNginxBlog() {
         unzip -o "${nginxStaticPath}html${selectInstallNginxBlogType}.zip" -d "${nginxStaticPath}" >/dev/null
         rm -f "${nginxStaticPath}html${selectInstallNginxBlogType}.zip*"
         echoContent green " ---> 更换伪站成功"
+        read -r -p "按回车键返回伪装站点菜单..." _
+        updateNginxBlog 1
     else
         echoContent red " ---> 选择错误，请重新选择"
-        updateNginxBlog
+        updateNginxBlog 1
     fi
 }
 
@@ -7827,6 +7895,8 @@ portManagement() {
 
     if [[ -z "${coreInstallType}" && -z "${singBoxConfigPath}" && -z "${subscribePort}" ]]; then
         echoContent red "\n ---> 未检测到任何已安装的服务或协议！"
+        read -r -p "按回车键返回协议与端口管理..." _
+        protocolPortMenu
         return 0
     fi
 
@@ -7850,23 +7920,26 @@ portManagement() {
 
     if [[ ${index} -eq 0 ]]; then
         echoContent red " ---> 未找到可管理的协议端口"
+        read -r -p "按回车键返回协议与端口管理..." _
+        protocolPortMenu
         return 0
     fi
 
     echoContent red "================================================================"
-    echoContent skyBlue "0. 返回主菜单"
+    echoContent skyBlue "0. 返回协议与端口管理"
     echo
     local selectedIndex
     read -r -p "请选择要修改端口的序号 [0-${index}]: " selectedIndex
 
     if [[ "${selectedIndex}" == "0" || -z "${selectedIndex}" ]]; then
-        menu
+        protocolPortMenu
         return 0
     fi
 
     if ! [[ "${selectedIndex}" =~ ^[1-9][0-9]*$ ]] || ((selectedIndex > index)); then
         echoContent red " ---> 输入错误，无效的序号"
-        return 1
+        portManagement
+        return 0
     fi
 
     local targetIdx=$((selectedIndex - 1))
@@ -7882,11 +7955,15 @@ portManagement() {
 
     if ! [[ "${newPort}" =~ ^[0-9]{1,5}$ ]] || ((newPort < 1 || newPort > 65535)); then
         echoContent red " ---> 端口必须是 1 到 65535 之间的纯数字！"
-        return 1
+        read -r -p "按回车键返回端口管理..." _
+        portManagement
+        return 0
     fi
 
     if [[ "${newPort}" == "${oldPort}" ]]; then
         echoContent yellow " ---> 新端口与当前端口相同，无需修改。"
+        read -r -p "按回车键返回端口管理..." _
+        portManagement
         return 0
     fi
 
@@ -7900,7 +7977,9 @@ portManagement() {
         fi
         if [[ -n "${portCheck}" ]]; then
             echoContent red " ---> 警告：检测到端口 ${newPort} 已被其他程序占用，请更换端口！"
-            return 1
+            read -r -p "按回车键返回端口管理..." _
+            portManagement
+            return 0
         fi
     fi
 
@@ -7970,6 +8049,8 @@ portManagement() {
     echoContent green " ---> 服务已正常启动，订阅已自动同步更新！"
     echoContent yellow " ---> 请在 v2rayNG / Clash 等客户端中执行【更新订阅】即可立即生效。"
     echoContent green "================================================================\n"
+    read -r -p "按回车键返回端口管理..." _
+    portManagement
 }
 
 # 添加新端口
@@ -8116,8 +8197,8 @@ unInstall() {
     read -r -p "是否确认卸载安装内容？[y/n]:" unInstallStatus
     if [[ "${unInstallStatus}" != "y" ]]; then
         echoContent green " ---> 放弃卸载"
-        menu
-        exit 0
+        scriptMaintainMenu
+        return 0
     fi
     removeAllPortHopping || {
         echoContent red " ---> 端口跳跃清理失败，已停止卸载，请检查防火墙后重试"
@@ -8188,9 +8269,15 @@ manageCDN() {
         echoContent yellow "4.CNAME www.visa.com.hk"
         echoContent yellow "5.手动输入[可输入多个，比如: 1.1.1.1,1.1.2.2,cloudflare.com 逗号分隔]"
         echoContent yellow "6.移除CDN节点"
+        echoContent skyBlue "--------------------------------------------------------------"
+        echoContent skyBlue "0.返回站点与证书管理"
         echoContent red "=============================================================="
-        read -r -p "请选择:" selectCDNType
+        read -r -p "请选择 [0-6]: " selectCDNType
         case ${selectCDNType} in
+        0 | "")
+            siteCertMenu
+            return 0
+            ;;
         1)
             setCDNDomain="www.digitalocean.com"
             ;;
@@ -8204,12 +8291,23 @@ manageCDN() {
             setCDNDomain="www.visa.com.hk"
             ;;
         5)
-            read -r -p "请输入想要自定义CDN IP或者域名:" setCDNDomain
+            read -r -p "请输入想要自定义CDN IP或者域名 (留空取消):" setCDNDomain
+            if [[ -z "${setCDNDomain}" ]]; then
+                manageCDN 1
+                return 0
+            fi
             ;;
         6)
             echo >/etc/v2ray-agent/cdn
             echoContent green " ---> 移除成功"
-            exit 0
+            read -r -p "按回车键返回站点与证书管理..." _
+            siteCertMenu
+            return 0
+            ;;
+        *)
+            echoContent red " ---> 选择错误，请重新输入 [0-6]"
+            manageCDN 1
+            return 0
             ;;
         esac
 
@@ -8218,6 +8316,8 @@ manageCDN() {
             echo "${setCDNDomain}" >"/etc/v2ray-agent/cdn"
             echoContent green " ---> 修改CDN成功"
             subscribe false false
+            read -r -p "按回车键返回站点与证书管理..." _
+            siteCertMenu
         else
             echoContent red " ---> 不可以为空，请重新输入"
             manageCDN 1
@@ -8226,6 +8326,8 @@ manageCDN() {
         echoContent yellow "\n教程地址:"
         echoContent skyBlue "https://www.v2ray-agent.com/archives/cloudflarezi-xuan-ip\n"
         echoContent red " ---> 未检测到可以使用的协议，仅支持ws、grpc、HTTPUpgrade相关的协议"
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
     fi
 }
 # 自定义uuid
@@ -8696,8 +8798,13 @@ bbrInstall() {
     read -r -p "请选择 [0-1]:" installBBRStatus
     if [[ "${installBBRStatus}" == "1" ]]; then
         wget -O tcpx.sh "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh
-    else
+        read -r -p "按回车键返回主菜单..." _
         menu
+    elif [[ "${installBBRStatus}" == "0" || -z "${installBBRStatus}" ]]; then
+        menu
+    else
+        echoContent red " ---> 输入无效，请输入 0-1"
+        bbrInstall
     fi
 }
 
@@ -8705,11 +8812,15 @@ bbrInstall() {
 checkLog() {
     if [[ "${coreInstallType}" == "2" ]]; then
         echoContent red "\n ---> 此功能仅支持Xray-core内核"
-        exit 0
+        read -r -p "按回车键返回核心服务管理..." _
+        coreVersionManageMenu 1
+        return 0
     fi
     if [[ -z "${configPath}" && -z "${realityStatus}" ]]; then
         echoContent red " ---> 没有检测到安装目录，请执行脚本安装内容"
-        exit 0
+        read -r -p "按回车键返回核心服务管理..." _
+        coreVersionManageMenu 1
+        return 0
     fi
     local realityLogShow=
     local logStatus=false
@@ -8732,12 +8843,18 @@ checkLog() {
     echoContent yellow "4.查看证书定时任务日志"
     echoContent yellow "5.查看证书安装日志"
     echoContent yellow "6.清空日志"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回 Xray-core 管理"
     echoContent red "=============================================================="
 
-    read -r -p "请选择:" selectAccessLogType
+    read -r -p "请选择 [0-6]: " selectAccessLogType
     local configPathLog=${configPath//conf\//}
 
     case ${selectAccessLogType} in
+    0 | "")
+        xrayVersionManageMenu 1
+        return 0
+        ;;
     1)
         if [[ "${logStatus}" == "false" ]]; then
             realityLogShow=true
@@ -8786,13 +8903,24 @@ EOF
             touch /etc/v2ray-agent/crontab_tls.log
         fi
         tail -n 100 /etc/v2ray-agent/crontab_tls.log
+        read -r -p "按回车键返回日志菜单..." _
+        checkLog 1
         ;;
     5)
         tail -n 100 /etc/v2ray-agent/tls/acme.log
+        read -r -p "按回车键返回日志菜单..." _
+        checkLog 1
         ;;
     6)
         echo >"${configPathLog}access.log"
         echo >"${configPathLog}error.log"
+        echoContent green " ---> 日志已清空"
+        read -r -p "按回车键返回日志菜单..." _
+        checkLog 1
+        ;;
+    *)
+        echoContent red " ---> 输入无效，请输入 0-6"
+        checkLog 1
         ;;
     esac
 }
@@ -8830,7 +8958,7 @@ checkIPv6() {
 
     if [[ -z "${currentIPv6IP}" ]]; then
         echoContent red " ---> 不支持ipv6"
-        exit 0
+        return 1
     fi
 }
 
@@ -8838,29 +8966,45 @@ checkIPv6() {
 ipv6Routing() {
     if [[ -z "${configPath}" ]]; then
         echoContent red " ---> 未安装，请使用脚本安装"
+        read -r -p "按回车键返回主菜单..." _
         menu
-        exit 0
+        return 0
     fi
 
-    checkIPv6
+    if ! checkIPv6; then
+        read -r -p "按回车键返回智能分流菜单..." _
+        routingToolsMenu 1
+        return 0
+    fi
     echoContent skyBlue "\n功能 1/${totalProgress} : IPv6分流"
     echoContent red "\n=============================================================="
     echoContent yellow "1.查看已分流域名"
     echoContent yellow "2.添加域名"
     echoContent yellow "3.设置IPv6全局"
     echoContent yellow "4.卸载IPv6分流"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回智能分流菜单"
     echoContent red "=============================================================="
-    read -r -p "请选择:" ipv6Status
-    if [[ "${ipv6Status}" == "1" ]]; then
+    read -r -p "请选择 [0-4]: " ipv6Status
+    if [[ "${ipv6Status}" == "0" || -z "${ipv6Status}" ]]; then
+        routingToolsMenu 1
+        return 0
+    elif [[ "${ipv6Status}" == "1" ]]; then
         showIPv6Routing
-        exit 0
+        read -r -p "按回车键返回 IPv6 分流菜单..." _
+        ipv6Routing 1
+        return 0
     elif [[ "${ipv6Status}" == "2" ]]; then
         echoContent red "=============================================================="
         echoContent yellow "# 注意事项\n"
         echoContent yellow "# 注意事项"
         echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000 \n"
 
-        read -r -p "请按照上面示例录入域名:" domainList
+        read -r -p "请按照上面示例录入域名 (留空取消):" domainList
+        if [[ -z "${domainList}" ]]; then
+            ipv6Routing 1
+            return 0
+        fi
         if [[ "${coreInstallType}" == "1" ]]; then
             addXrayRouting IPv6_out outboundTag "${domainList}"
             addXrayOutbound IPv6_out
@@ -8918,7 +9062,8 @@ ipv6Routing() {
         else
 
             echoContent green " ---> 放弃设置"
-            exit 0
+            ipv6Routing 1
+            return 0
         fi
 
     elif [[ "${ipv6Status}" == "4" ]]; then
@@ -8937,11 +9082,14 @@ ipv6Routing() {
 
         echoContent green " ---> IPv6分流卸载成功"
     else
-        echoContent red " ---> 选择错误"
-        exit 0
+        echoContent red " ---> 选择错误，请输入 0-4"
+        ipv6Routing 1
+        return 0
     fi
 
     reloadCore
+    read -r -p "按回车键返回智能分流菜单..." _
+    routingToolsMenu 1
 }
 
 # ipv6分流规则展示
@@ -8974,12 +9122,15 @@ showIPv6Routing() {
 btTools() {
     if [[ "${coreInstallType}" == "2" ]]; then
         echoContent red "\n ---> 此功能仅支持Xray-core内核，请等待后续更新"
-        exit 0
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
+        return 0
     fi
     if [[ -z "${configPath}" ]]; then
         echoContent red " ---> 未安装，请使用脚本安装"
-        menu
-        exit 0
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
+        return 0
     fi
 
     echoContent skyBlue "\n功能 1/${totalProgress} : bt下载管理"
@@ -8993,9 +9144,14 @@ btTools() {
 
     echoContent yellow "1.禁止下载BT"
     echoContent yellow "2.允许下载BT"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回站点与证书管理"
     echoContent red "=============================================================="
-    read -r -p "请选择:" btStatus
-    if [[ "${btStatus}" == "1" ]]; then
+    read -r -p "请选择 [0-2]: " btStatus
+    if [[ "${btStatus}" == "0" || -z "${btStatus}" ]]; then
+        siteCertMenu
+        return 0
+    elif [[ "${btStatus}" == "1" ]]; then
 
         if [[ -f "${configPath}09_routing.json" ]]; then
 
@@ -9036,19 +9192,23 @@ EOF
 
         echoContent green " ---> 允许BT下载"
     else
-        echoContent red " ---> 选择错误"
-        exit 0
+        echoContent red " ---> 选择错误，请输入 0-2"
+        btTools 1
+        return 0
     fi
 
     reloadCore
+    read -r -p "按回车键返回站点与证书管理..." _
+    siteCertMenu
 }
 
 # 域名黑名单
 blacklist() {
     if [[ -z "${configPath}" ]]; then
         echoContent red " ---> 未安装，请使用脚本安装"
-        menu
-        exit 0
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
+        return 0
     fi
 
     echoContent skyBlue "\n进度  $1/${totalProgress} : 域名黑名单"
@@ -9059,12 +9219,23 @@ blacklist() {
     echoContent yellow "4.卸载黑/白名单"
     echoContent yellow "5.添加IP"
     echoContent yellow "6.添加域名白名单"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回站点与证书管理"
     echoContent red "=============================================================="
 
-    read -r -p "请选择:" blacklistStatus
-    if [[ "${blacklistStatus}" == "1" ]]; then
-        jq -r -c '.routing.rules[]|select (.outboundTag=="blackhole_out")|.domain' ${configPath}09_routing.json | jq -r
-        exit 0
+    read -r -p "请选择 [0-6]: " blacklistStatus
+    if [[ "${blacklistStatus}" == "0" || -z "${blacklistStatus}" ]]; then
+        siteCertMenu
+        return 0
+    elif [[ "${blacklistStatus}" == "1" ]]; then
+        if [[ -f "${configPath}09_routing.json" ]]; then
+            jq -r -c '.routing.rules[]|select (.outboundTag=="blackhole_out")|.domain' ${configPath}09_routing.json | jq -r
+        else
+            echoContent yellow " ---> 暂无黑名单规则"
+        fi
+        read -r -p "按回车键返回黑名单管理..." _
+        blacklist 1
+        return 0
     elif [[ "${blacklistStatus}" == "2" ]]; then
         echoContent red "=============================================================="
         echoContent yellow "# 注意事项\n"
@@ -9073,7 +9244,11 @@ blacklist() {
         echoContent yellow "3.录入示例:speedtest,facebook,cn,example.com"
         echoContent yellow "4.如果域名在预定义域名列表中存在则使用 geosite:xx，如果不存在则默认使用输入的域名"
         echoContent yellow "5.添加规则为增量配置，不会删除之前设置的内容\n"
-        read -r -p "请按照上面示例录入域名:" domainList
+        read -r -p "请按照上面示例录入域名 (留空取消):" domainList
+        if [[ -z "${domainList}" ]]; then
+            blacklist 1
+            return 0
+        fi
         if [[ "${coreInstallType}" == "1" ]]; then
             addXrayRouting blackhole_out outboundTag "${domainList}"
             addXrayOutbound blackhole_out
@@ -9145,7 +9320,8 @@ blacklist() {
         read -r -p "请按照上面示例录入IP:" ipList
         if [[ -z "${ipList}" ]]; then
             echoContent red " ---> IP不可为空"
-            exit 0
+            blacklist 1
+            return 0
         fi
 
         if [[ "${coreInstallType}" == "1" ]]; then
@@ -9164,7 +9340,8 @@ blacklist() {
         read -r -p "请按照上面示例录入域名:" allowDomainList
         if [[ -z "${allowDomainList}" ]]; then
             echoContent red " ---> 域名不可为空"
-            exit 0
+            blacklist 1
+            return 0
         fi
 
         if [[ "${coreInstallType}" == "1" ]]; then
@@ -9178,10 +9355,13 @@ blacklist() {
         fi
         echoContent green " ---> 添加域名白名单完毕"
     else
-        echoContent red " ---> 选择错误"
-        exit 0
+        echoContent red " ---> 选择错误，请输入 0-6"
+        blacklist 1
+        return 0
     fi
     reloadCore
+    read -r -p "按回车键返回黑名单管理..." _
+    blacklist 1
 }
 # 下载 dlc.dat_plain.yml 到核心目录
 downloadDLCPlainYAML() {
@@ -9690,8 +9870,19 @@ warpRoutingReg() {
     echoContent yellow "2.添加域名"
     echoContent yellow "3.设置WARP全局"
     echoContent yellow "4.卸载WARP分流"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回智能分流菜单"
     echoContent red "=============================================================="
-    read -r -p "请选择:" warpStatus
+    read -r -p "请选择 [0-4]: " warpStatus
+    if [[ "${warpStatus}" == "0" || -z "${warpStatus}" ]]; then
+        routingToolsMenu 1
+        return 0
+    fi
+    if ! [[ "${warpStatus}" =~ ^[1-4]$ ]]; then
+        echoContent red " ---> 选择错误，请输入 0-4"
+        warpRoutingReg "$1" "${type}"
+        return 0
+    fi
     installWarpReg
     readConfigWarpReg
     local address=
@@ -9700,18 +9891,26 @@ warpRoutingReg() {
     elif [[ ${type} == "IPv6" ]]; then
         address="${addressWarpReg}/128"
     else
-        echoContent red " ---> IP获取失败，退出安装"
+        echoContent red " ---> IP获取失败，返回上级菜单"
+        routingToolsMenu 1
+        return 0
     fi
 
     if [[ "${warpStatus}" == "1" ]]; then
         showWireGuardDomain "${type}"
-        exit 0
+        read -r -p "按回车键返回 WARP 分流菜单..." _
+        warpRoutingReg "$1" "${type}"
+        return 0
     elif [[ "${warpStatus}" == "2" ]]; then
         echoContent yellow "# 注意事项"
         echoContent yellow "# 支持sing-box、Xray-core"
         echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000 \n"
 
-        read -r -p "请按照上面示例录入域名:" domainList
+        read -r -p "请按照上面示例录入域名 (留空取消):" domainList
+        if [[ -z "${domainList}" ]]; then
+            warpRoutingReg "$1" "${type}"
+            return 0
+        fi
         addWireGuardRoute "${type}" outboundTag "${domainList}"
         echoContent green " ---> 添加完毕"
 
@@ -9771,7 +9970,8 @@ warpRoutingReg() {
             echoContent green " ---> WARP全局出站设置完毕"
         else
             echoContent green " ---> 放弃设置"
-            exit 0
+            warpRoutingReg "$1" "${type}"
+            return 0
         fi
 
     elif [[ "${warpStatus}" == "4" ]]; then
@@ -9790,12 +9990,10 @@ warpRoutingReg() {
         fi
 
         echoContent green " ---> 卸载WARP ${type}分流完毕"
-    else
-
-        echoContent red " ---> 选择错误"
-        exit 0
     fi
     reloadCore
+    read -r -p "按回车键返回智能分流菜单..." _
+    routingToolsMenu 1
 }
 
 # 分流工具
@@ -9840,6 +10038,10 @@ routingToolsMenu() {
             echoContent red "\n ---> 此功能不支持Hysteria2、Tuic"
         fi
         sniRouting 1
+        ;;
+    *)
+        echoContent red " ---> 输入编号无效，请重新输入 [0-6]"
+        routingToolsMenu 1
         ;;
     esac
 }
@@ -10370,21 +10572,36 @@ socks5Routing() {
     echoContent yellow "1.连接落地机（SOCKS5 出站）"
     echoContent yellow "2.搭建落地机（SOCKS5 入站）"
     echoContent yellow "3.卸载"
-    read -r -p "请选择:" selectType
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回智能分流菜单"
+    echoContent red "=============================================================="
+    read -r -p "请选择 [0-3]: " selectType
 
     case ${selectType} in
+    0 | "")
+        routingToolsMenu 1
+        ;;
     1)
         if [[ -z "${coreInstallType}" ]]; then
             echoContent red " ---> 未安装任意协议，请使用 1.安装 或者 2.任意组合安装 进行安装后使用"
-            return 1
+            read -r -p "按回车键返回 Socks5 分流菜单..." _
+            socks5Routing
+            return 0
         fi
         socks5OutboundRoutingMenu
+        socks5Routing
         ;;
     2)
         socks5InboundRoutingMenu
         ;;
     3)
         removeSocks5Routing
+        read -r -p "按回车键返回 Socks5 分流菜单..." _
+        socks5Routing
+        ;;
+    *)
+        echoContent red " ---> 选择错误，请输入 0-3"
+        socks5Routing
         ;;
     esac
 }
@@ -10398,10 +10615,18 @@ socks5InboundRoutingMenu() {
     echoContent yellow "2.查看分流规则"
     echoContent yellow "3.添加分流规则"
     echoContent yellow "4.查看入站配置"
-    read -r -p "请选择:" selectType
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回 Socks5 分流菜单"
+    echoContent red "=============================================================="
+    read -r -p "请选择 [0-4]: " selectType
     case ${selectType} in
+    0 | "")
+        socks5Routing
+        ;;
     1)
         installSocks5InboundStandalone
+        read -r -p "按回车键返回 Socks5 入站菜单..." _
+        socks5InboundRoutingMenu
         ;;
     2)
         if [[ -f /etc/v2ray-agent/sing-box/conf/config/00_socks5_guard.json ]]; then
@@ -10409,9 +10634,13 @@ socks5InboundRoutingMenu() {
         else
             echoContent red " ---> 未安装相应功能"
         fi
+        read -r -p "按回车键返回 Socks5 入站菜单..." _
+        socks5InboundRoutingMenu
         ;;
     3)
         updateSocks5InboundRules
+        read -r -p "按回车键返回 Socks5 入站菜单..." _
+        socks5InboundRoutingMenu
         ;;
     4)
         if [[ -f "/etc/v2ray-agent/sing-box/conf/config/20_socks5_inbounds.json" ]]; then
@@ -10423,6 +10652,12 @@ socks5InboundRoutingMenu() {
         else
             echoContent red " ---> 未安装相应功能"
         fi
+        read -r -p "按回车键返回 Socks5 入站菜单..." _
+        socks5InboundRoutingMenu
+        ;;
+    *)
+        echoContent red " ---> 选择错误，请输入 0-4"
+        socks5InboundRoutingMenu
         ;;
     esac
 
@@ -12099,8 +12334,9 @@ dnsRouting() {
 
     if [[ -z "${configPath}" ]]; then
         echoContent red " ---> 未安装，请使用脚本安装"
+        read -r -p "按回车键返回主菜单..." _
         menu
-        exit 0
+        return 0
     fi
     echoContent skyBlue "\n功能 1/${totalProgress} : DNS分流"
     echoContent red "\n=============================================================="
@@ -12109,14 +12345,28 @@ dnsRouting() {
 
     echoContent yellow "1.添加"
     echoContent yellow "2.卸载"
-    read -r -p "请选择:" selectType
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回智能分流菜单"
+    echoContent red "=============================================================="
+    read -r -p "请选择 [0-2]: " selectType
 
     case ${selectType} in
+    0 | "")
+        routingToolsMenu 1
+        ;;
     1)
         setUnlockDNS
+        read -r -p "按回车键返回智能分流菜单..." _
+        routingToolsMenu 1
         ;;
     2)
         removeUnlockDNS
+        read -r -p "按回车键返回智能分流菜单..." _
+        routingToolsMenu 1
+        ;;
+    *)
+        echoContent red " ---> 选择错误，请输入 0-2"
+        dnsRouting 1
         ;;
     esac
 }
@@ -12126,8 +12376,9 @@ sniRouting() {
 
     if [[ -z "${configPath}" ]]; then
         echoContent red " ---> 未安装，请使用脚本安装"
+        read -r -p "按回车键返回主菜单..." _
         menu
-        exit 0
+        return 0
     fi
     echoContent skyBlue "\n功能 1/${totalProgress} : SNI反向代理分流"
     echoContent red "\n=============================================================="
@@ -12137,14 +12388,28 @@ sniRouting() {
 
     echoContent yellow "1.添加"
     echoContent yellow "2.卸载"
-    read -r -p "请选择:" selectType
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回智能分流菜单"
+    echoContent red "=============================================================="
+    read -r -p "请选择 [0-2]: " selectType
 
     case ${selectType} in
+    0 | "")
+        routingToolsMenu 1
+        ;;
     1)
         setUnlockSNI
+        read -r -p "按回车键返回智能分流菜单..." _
+        routingToolsMenu 1
         ;;
     2)
         removeUnlockSNI
+        read -r -p "按回车键返回智能分流菜单..." _
+        routingToolsMenu 1
+        ;;
+    *)
+        echoContent red " ---> 选择错误，请输入 0-2"
+        sniRouting 1
         ;;
     esac
 }
@@ -12415,16 +12680,25 @@ customSingBoxInstall() {
     echoContent yellow "10.Naive"
     echoContent yellow "11.VMess+TLS+HTTPUpgrade"
     echoContent yellow "13.anytls"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "直接回车 返回选择核心 (0 为 VLESS+Vision+TCP 协议)"
+    echoContent red "=============================================================="
 
     read -r -p "请选择[多选]，[例如:1,2,3]:" selectCustomInstallType
     echoContent skyBlue "--------------------------------------------------------------"
+    if [[ -z "${selectCustomInstallType}" ]]; then
+        selectCoreInstall
+        return 0
+    fi
     if echo "${selectCustomInstallType}" | grep -q "，"; then
         echoContent red " ---> 请使用英文逗号分隔"
-        exit 0
+        customSingBoxInstall
+        return 0
     fi
     if [[ "${selectCustomInstallType}" != "10" ]] && [[ "${selectCustomInstallType}" != "11" ]] && [[ "${selectCustomInstallType}" != "13" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
         echoContent red " ---> 多选请使用英文逗号分隔"
-        exit 0
+        customSingBoxInstall
+        return 0
     fi
     if [[ "${selectCustomInstallType: -1}" != "," ]]; then
         selectCustomInstallType="${selectCustomInstallType},"
@@ -12528,15 +12802,24 @@ customXrayInstall() {
     # echoContent yellow "8.VLESS+Reality+gRPC"
     echoContent yellow "12.VLESS+REALITY+XHTTP"
     echoContent yellow "14.VLESS+XHTTP+TLS[支持CDN，随机端口，无需Nginx]"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "直接回车 返回选择核心 (0 为 VLESS+TLS_Vision+TCP 协议)"
+    echoContent red "=============================================================="
     read -r -p "请选择[多选]，[例如:1,2,3]:" selectCustomInstallType
     echoContent skyBlue "--------------------------------------------------------------"
+    if [[ -z "${selectCustomInstallType}" ]]; then
+        selectCoreInstall
+        return 0
+    fi
     if echo "${selectCustomInstallType}" | grep -q "，"; then
         echoContent red " ---> 请使用英文逗号分隔"
-        exit 0
+        customXrayInstall
+        return 0
     fi
     if [[ "${selectCustomInstallType}" != "12" && "${selectCustomInstallType}" != "14" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
         echoContent red " ---> 多选请使用英文逗号分隔"
-        exit 0
+        customXrayInstall
+        return 0
     fi
     selectCustomInstallType=$(normalizeXrayInstallSelection "${selectCustomInstallType}")
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]]; then
@@ -12663,12 +12946,12 @@ selectCoreInstall() {
     echoContent skyBlue "\n========================= 选择安装核心 ========================="
     echoContent yellow "  1. Xray-core  (推荐 Reality / XHTTP / Vision 高性能组合)"
     echoContent yellow "  2. sing-box   (推荐 Hysteria2 / TUIC / 多协议全能核心)"
-    echoContent skyBlue "  0. 返回主菜单"
+    echoContent skyBlue "  0. 返回部署菜单"
     echoContent red "================================================================"
     read -r -p "请选择 [0-2]: " selectCoreType
     case ${selectCoreType} in
     0 | "")
-        menu
+        deployNodeMenu
         ;;
     1)
         if [[ "${selectInstallType}" == "1" ]]; then
@@ -12784,6 +13067,8 @@ singBoxInstall() {
 coreVersionManageMenu() {
     if [[ -z "${coreInstallType}" && -z "${singBoxConfigPath}" ]]; then
         echoContent red "\n ---> 未检测到任何已安装的核心，请先执行安装！"
+        read -r -p "按回车键返回主菜单..." _
+        menu
         return 0
     fi
     echoContent skyBlue "\n========================= 核心服务管理 ========================="
@@ -12799,6 +13084,9 @@ coreVersionManageMenu() {
         singBoxVersionManageMenu 1
     elif [[ "${selectCore}" == "0" || -z "${selectCore}" ]]; then
         menu
+    else
+        echoContent red " ---> 输入编号无效，请重新输入 [0-2]"
+        coreVersionManageMenu 1
     fi
 }
 # 定时任务检查
@@ -12819,10 +13107,14 @@ cronFunction() {
 manageAccount() {
     if [[ "${currentInstallProtocolType}" == ",20," ]]; then
         echoContent yellow " ---> 仅安装 SOCKS5 入站，请通过 Socks5 入站菜单管理配置"
-        return 1
+        read -r -p "按回车键返回主菜单..." _
+        menu
+        return 0
     fi
     if [[ -z "${configPath}" ]]; then
         echoContent red "\n ---> 未检测到已安装的协议配置，请先安装！"
+        read -r -p "按回车键返回主菜单..." _
+        menu
         return 0
     fi
 
@@ -12845,34 +13137,59 @@ manageAccount() {
         menu
         ;;
     1)
-        viewAccountsByUser
+        local rc=0
+        viewAccountsByUser || rc=$?
+        if [[ ${rc} -eq 2 ]]; then
+            manageAccount 1
+            return 0
+        fi
+        read -r -p "按回车键返回账号与订阅管理..." _
+        manageAccount 1
         ;;
     2)
-        viewSubscriptionByUser
+        local rc=0
+        viewSubscriptionByUser || rc=$?
+        if [[ ${rc} -eq 2 ]]; then
+            manageAccount 1
+            return 0
+        fi
+        read -r -p "按回车键返回账号与订阅管理..." _
+        manageAccount 1
         ;;
     3)
         subscribe
+        read -r -p "按回车键返回账号与订阅管理..." _
+        manageAccount 1
         ;;
     4)
         addUser
+        read -r -p "按回车键返回账号与订阅管理..." _
+        manageAccount 1
         ;;
     5)
         removeUser
+        read -r -p "按回车键返回账号与订阅管理..." _
+        manageAccount 1
         ;;
     6)
         addSubscribeMenu 1
         ;;
     *)
-        echoContent red " ---> 选择错误"
+        echoContent red " ---> 输入编号无效，请重新输入 [0-6]"
+        manageAccount 1
         ;;
     esac
 }
 
 viewAccountsByUser() {
     readInstallType
-    local users tempDir
+    local users tempDir rc=0
     users=$(collectAccountUsers) || return 1
-    selectAccountUser "${users}" || return 0
+    selectAccountUser "${users}" || {
+        rc=$?
+        if [[ ${rc} -eq 2 ]]; then return 2; fi
+        return ${rc}
+    }
     tempDir=$(mktemp -d) || return 1
     chmod 700 "${tempDir}" || {
         rm -rf "${tempDir}"
@@ -12935,9 +13252,13 @@ showUserSubscriptions() {
 
 viewSubscriptionByUser() {
     readInstallType
-    local users
+    local users rc=0
     users=$(collectAccountUsers) || return 1
-    selectAccountUser "${users}" || return 0
+    selectAccountUser "${users}" || {
+        rc=$?
+        if [[ ${rc} -eq 2 ]]; then return 2; fi
+        return ${rc}
+    }
     readNginxSubscribe
     if [[ -z "${subscribePort}" || ! -f /etc/v2ray-agent/subscribe_local/subscribeSalt ]]; then
         echoContent yellow " ---> 尚未初始化订阅服务，正在生成/更新订阅。"
@@ -13068,20 +13389,24 @@ addSubscribeMenu() {
     echoContent yellow "1.添加"
     echoContent yellow "2.移除"
     echoContent skyBlue "--------------------------------------------------------------"
-    echoContent skyBlue "0.返回"
+    echoContent skyBlue "0.返回账号与订阅管理"
     echoContent red "=============================================================="
     read -r -p "请选择 [0-2]: " addSubscribeStatus
     if [[ "${addSubscribeStatus}" == "0" || -z "${addSubscribeStatus}" ]]; then
+        manageAccount 1
         return 0
     elif [[ "${addSubscribeStatus}" == "1" ]]; then
         addOtherSubscribe
+        read -r -p "按回车键返回远程订阅菜单..." _
+        addSubscribeMenu 1
     elif [[ "${addSubscribeStatus}" == "2" ]]; then
         if [[ -f "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" ]]; then
             sed -i '/^$/d' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" >/dev/null 2>&1
         fi
         if [[ ! -s "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" ]]; then
             echoContent green " ---> 未安装其他订阅"
-            addSubscribeMenu
+            read -r -p "按回车键返回远程订阅菜单..." _
+            addSubscribeMenu 1
             return 0
         fi
         local totalSubCount
@@ -13089,12 +13414,12 @@ addSubscribeMenu() {
         awk '{print NR":"$0}' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl"
         read -r -p "请选择要删除的订阅编号 [1-${totalSubCount}，仅支持单个删除，输入 0 或留空取消]: " delSubscribeIndex
         if [[ "${delSubscribeIndex}" == "0" || -z "${delSubscribeIndex}" ]]; then
-            addSubscribeMenu
+            addSubscribeMenu 1
             return 0
         fi
         if ! [[ "${delSubscribeIndex}" =~ ^[1-9][0-9]*$ ]] || ((delSubscribeIndex < 1 || delSubscribeIndex > totalSubCount)); then
             echoContent red " ---> 输入编号无效，请输入 1-${totalSubCount} 之间的整数"
-            addSubscribeMenu
+            addSubscribeMenu 1
             return 0
         fi
 
@@ -13102,9 +13427,11 @@ addSubscribeMenu() {
 
         echoContent green " ---> 其他机器订阅删除成功"
         subscribe
+        read -r -p "按回车键返回远程订阅菜单..." _
+        addSubscribeMenu 1
     else
         echoContent red " ---> 输入无效，请输入 0-2"
-        addSubscribeMenu
+        addSubscribeMenu 1
     fi
 }
 # 添加其他机器clashMeta订阅
@@ -13736,7 +14063,9 @@ switchAlpn() {
     echoContent skyBlue "\n功能 1/${totalProgress} : 切换alpn"
     if [[ -z ${currentAlpn} ]]; then
         echoContent red " ---> 无法读取alpn，请检查是否安装"
-        exit 0
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
+        return 0
     fi
 
     echoContent red "\n=============================================================="
@@ -13753,11 +14082,14 @@ switchAlpn() {
     else
         echoContent red '不符合'
     fi
-
+    echoContent skyBlue "0.返回站点与证书管理"
     echoContent red "=============================================================="
 
-    read -r -p "请选择:" selectSwitchAlpnType
-    if [[ "${selectSwitchAlpnType}" == "1" && "${currentAlpn}" == "http/1.1" ]]; then
+    read -r -p "请选择 [0-1]: " selectSwitchAlpnType
+    if [[ "${selectSwitchAlpnType}" == "0" || -z "${selectSwitchAlpnType}" ]]; then
+        siteCertMenu
+        return 0
+    elif [[ "${selectSwitchAlpnType}" == "1" && "${currentAlpn}" == "http/1.1" ]]; then
 
         local frontingTypeJSON
         frontingTypeJSON=$(jq -r ".inbounds[0].streamSettings.tlsSettings.alpn = [\"h2\",\"http/1.1\"]" ${configPath}${frontingType}.json)
@@ -13768,10 +14100,13 @@ switchAlpn() {
         frontingTypeJSON=$(jq -r ".inbounds[0].streamSettings.tlsSettings.alpn =[\"http/1.1\",\"h2\"]" ${configPath}${frontingType}.json)
         echo "${frontingTypeJSON}" | jq . >${configPath}${frontingType}.json
     else
-        echoContent red " ---> 选择错误"
-        exit 0
+        echoContent red " ---> 选择错误，请输入 0-1"
+        switchAlpn 1
+        return 0
     fi
     reloadCore
+    read -r -p "按回车键返回站点与证书管理..." _
+    siteCertMenu
 }
 
 # 初始化realityKey
@@ -14086,6 +14421,8 @@ manageReality() {
 
     if ! echo "${currentInstallProtocolType}" | grep -q -E "7,|8,|12," || [[ -z "${coreInstallType}" ]]; then
         echoContent red "\n ---> 未检测到已安装的 Reality 协议！"
+        read -r -p "按回车键返回协议与端口管理..." _
+        protocolPortMenu
         return 0
     fi
 
@@ -14127,13 +14464,17 @@ manageReality() {
     echoContent red "===================================================================="
     echoContent yellow "1. 更换伪装域名 (SNI)"
     echoContent yellow "2. 完整重新配置 Reality (重新生成密钥/配置)"
-    echoContent skyBlue "0. 返回主菜单"
+    echoContent skyBlue "0. 返回协议与端口管理"
     echoContent red "===================================================================="
 
     local selectRealityManageType
     read -r -p "请选择 [0-2]: " selectRealityManageType
 
     case "${selectRealityManageType}" in
+    0 | "")
+        protocolPortMenu
+        return 0
+        ;;
     1)
         echoContent skyBlue "\n----------------------- 更换伪装域名 (SNI) -----------------------"
         echoContent yellow "常用推荐 SNI 参考："
@@ -14150,13 +14491,17 @@ manageReality() {
 
         if [[ -z "${newSni}" ]]; then
             echoContent red " ---> 伪装域名不能为空！"
-            return 1
+            read -r -p "按回车键返回 REALITY 管理..." _
+            manageReality 1
+            return 0
         fi
 
         # 域名合法性粗校验
         if ! [[ "${newSni}" =~ ^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}$ ]]; then
             echoContent red " ---> 域名格式不正确: ${newSni}"
-            return 1
+            read -r -p "按回车键返回 REALITY 管理..." _
+            manageReality 1
+            return 0
         fi
 
         local newTargetPort
@@ -14164,7 +14509,9 @@ manageReality() {
         newTargetPort=${newTargetPort:-443}
         if ! [[ "${newTargetPort}" =~ ^[0-9]{1,5}$ ]] || ((newTargetPort < 1 || newTargetPort > 65535)); then
             echoContent red " ---> 目标端口必须是 1 到 65535 之间数字！"
-            return 1
+            read -r -p "按回车键返回 REALITY 管理..." _
+            manageReality 1
+            return 0
         fi
 
         echoContent skyBlue "\n ---> 正在更新 Reality 配置文件..."
@@ -14249,6 +14596,8 @@ manageReality() {
         echoContent green " ---> 服务已重启，订阅已自动同步更新！"
         echoContent yellow " ---> 请在客户端（v2rayNG / Clash）点击【更新订阅】即可立即生效。"
         echoContent green "================================================================\n"
+        read -r -p "按回车键返回 REALITY 管理..." _
+        manageReality 1
         ;;
     2)
         if [[ "${coreInstallType}" == "1" ]]; then
@@ -14265,9 +14614,12 @@ manageReality() {
         fi
         reloadCore
         subscribe false
+        read -r -p "按回车键返回 REALITY 管理..." _
+        manageReality 1
         ;;
     *)
-        return 0
+        echoContent red " ---> 输入无效，请输入 0-2"
+        manageReality 1
         ;;
     esac
 }
@@ -14321,6 +14673,8 @@ realityScanner() {
 }
 # tuic管理
 manageTuic() {
+    readInstallType
+    readInstallProtocolType
     echoContent skyBlue "\n========================= TUIC 协议管理 ========================="
     local tuicStatus=
     if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/v2ray-agent/sing-box/conf/config/09_tuic_inbounds.json" ]]; then
@@ -14335,17 +14689,24 @@ manageTuic() {
         echoContent red "================================================================"
         echoContent yellow "  1. 安装 TUIC"
     fi
-    echoContent skyBlue "  0. 返回主菜单"
+    echoContent skyBlue "  0. 返回协议与端口管理"
     echoContent red "================================================================"
     read -r -p "请选择: " installTuicStatus
     if [[ "${installTuicStatus}" == "0" || -z "${installTuicStatus}" ]]; then
-        menu
+        protocolPortMenu
     elif [[ "${installTuicStatus}" == "1" ]]; then
         singBoxTuicInstall
+        read -r -p "按回车键返回 TUIC 协议管理..." _
+        manageTuic
     elif [[ "${installTuicStatus}" == "2" && "${tuicStatus}" == "true" ]]; then
         unInstallSingBox tuic
+        read -r -p "按回车键返回 TUIC 协议管理..." _
+        manageTuic
     elif [[ "${installTuicStatus}" == "3" && "${tuicStatus}" == "true" ]]; then
         portHoppingMenu tuic
+    else
+        echoContent red " ---> 输入无效，请重新选择"
+        manageTuic
     fi
 }
 # sing-box log日志
@@ -14374,6 +14735,8 @@ EOF
 singBoxVersionManageMenu() {
     if [[ -z "${singBoxConfigPath}" ]]; then
         echoContent red "\n ---> 未检测到 sing-box 安装目录，请先安装 sing-box"
+        read -r -p "按回车键返回核心服务管理..." _
+        coreVersionManageMenu 1
         return 0
     fi
     local sbVer=""
@@ -14401,12 +14764,12 @@ singBoxVersionManageMenu() {
 
     echoContent yellow "  7. 实时查看日志"
     echoContent skyBlue "----------------------------------------------------------------"
-    echoContent skyBlue "  0. 返回主菜单"
+    echoContent skyBlue "  0. 返回核心服务管理"
     echoContent red "================================================================"
 
     read -r -p "请选择 [0-7]: " selectSingBoxType
     if [[ "${selectSingBoxType}" == "0" || -z "${selectSingBoxType}" ]]; then
-        menu
+        coreVersionManageMenu 1
         return 0
     fi
     if [[ ! -f "${singBoxConfigPath}../box.log" ]]; then
@@ -14417,7 +14780,7 @@ singBoxVersionManageMenu() {
         3)
             socks5SingBoxService stop
             read -r -p "按回车键返回 sing-box 管理..." _
-            singBoxVersionManageMenu
+            singBoxVersionManageMenu 1
             return 0
             ;;
         4 | 5)
@@ -14427,7 +14790,7 @@ singBoxVersionManageMenu() {
             sleep 1
             socks5SingBoxService status
             read -r -p "按回车键返回 sing-box 管理..." _
-            singBoxVersionManageMenu
+            singBoxVersionManageMenu 1
             return 0
             ;;
         esac
@@ -14442,6 +14805,8 @@ singBoxVersionManageMenu() {
             handleSingBox stop
             handleSingBox start
         fi
+        read -r -p "按回车键返回 sing-box 管理..." _
+        singBoxVersionManageMenu 1
     elif [[ "${selectSingBoxType}" == "2" ]]; then
         prereleaseStatus=true
         installSingBox 1 || return 1
@@ -14452,20 +14817,34 @@ singBoxVersionManageMenu() {
             handleSingBox stop
             handleSingBox start
         fi
+        read -r -p "按回车键返回 sing-box 管理..." _
+        singBoxVersionManageMenu 1
     elif [[ "${selectSingBoxType}" == "3" ]]; then
         handleSingBox stop
+        read -r -p "按回车键返回 sing-box 管理..." _
+        singBoxVersionManageMenu 1
     elif [[ "${selectSingBoxType}" == "4" ]]; then
         handleSingBox start
+        read -r -p "按回车键返回 sing-box 管理..." _
+        singBoxVersionManageMenu 1
     elif [[ "${selectSingBoxType}" == "5" ]]; then
         handleSingBox stop
         handleSingBox start
+        read -r -p "按回车键返回 sing-box 管理..." _
+        singBoxVersionManageMenu 1
     elif [[ "${selectSingBoxType}" == "6" ]]; then
         singBoxLog ${logStatus}
         if [[ "${logStatus}" == "false" ]]; then
             tail -f "${singBoxConfigPath}../box.log"
+        else
+            read -r -p "按回车键返回 sing-box 管理..." _
+            singBoxVersionManageMenu 1
         fi
     elif [[ "${selectSingBoxType}" == "7" ]]; then
         tail -f "${singBoxConfigPath}../box.log"
+    else
+        echoContent red " ---> 输入编号无效，请重新输入 [0-7]"
+        singBoxVersionManageMenu 1
     fi
 }
 
@@ -14551,7 +14930,11 @@ siteCertMenu() {
     local selSiteCert
     read -r -p "请选择 [0-6]: " selSiteCert
     case "${selSiteCert}" in
-    1) renewalTLS 1 ;;
+    1)
+        renewalTLS 1
+        read -r -p "按回车键返回站点与证书管理..." _
+        siteCertMenu
+        ;;
     2) manageCDN 1 ;;
     3) switchAlpn 1 ;;
     4) updateNginxBlog 1 ;;
