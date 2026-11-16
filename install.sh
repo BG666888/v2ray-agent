@@ -1086,7 +1086,7 @@ syncXrayHysteria2InboundBandwidth() {
     local downSpeed=${1:-0} upSpeed=${2:-0} runTest=${3:-test}
     local xrayHy2File="${configPath:-/etc/v2ray-agent/xray/conf/}06_hysteria2_inbounds.json"
     [[ -f "${xrayHy2File}" ]] || return 0
-    local tmpFile backupFile testDi
+    local tmpFile backupFile testDir
     tmpFile=$(mktemp "${xrayHy2File}.tmp.XXXXXX") || return 1
     backupFile=$(mktemp "${xrayHy2File}.bak.XXXXXX") || {
         rm -f "${tmpFile}"
@@ -1184,7 +1184,7 @@ syncSingBoxHysteria2InboundBandwidth() {
 
     local sbBin="${singBoxConfigPath%/conf/config/}/sing-box"
     if [[ "${runTest}" != "no_test" && -n "${singBoxConfigPath}" && -x "${sbBin}" && "${configFile}" == "${singBoxConfigPath}"* ]]; then
-        local tmpCheckDi
+        local tmpCheckDir
         tmpCheckDir=$(mktemp -d "${TMPDIR:-/tmp}/v2ray-agent-sbcheck.XXXXXX") || tmpCheckDir=""
         if [[ -n "${tmpCheckDir}" ]]; then
             if ! "${sbBin}" merge "${tmpCheckDir}/sing-box.json" -C "${singBoxConfigPath}" -D "${singBoxConfigPath%config/}" >/dev/null 2>&1 ||
@@ -1840,7 +1840,7 @@ installTools() {
             echoContent green " ---> 安装nginx"
             installNginxTools || return 1
         else
-            local nginxMajor nginxMino
+            local nginxMajor nginxMinor
             nginxVersion=$(nginx -v 2>&1) || nginxVersion=
             read -r nginxMajor nginxMinor < <(printf '%s\n' "${nginxVersion}" | sed -nE 's@^.*nginx/([0-9]+)\.([0-9]+).*@\1 \2@p')
             if ! [[ "${nginxMajor}" =~ ^[0-9]+$ && "${nginxMinor}" =~ ^[0-9]+$ ]]; then
@@ -1990,7 +1990,7 @@ installWarp() {
         exit 0
     fi
     systemctl enable warp-svc
-    warp-cli --accept-tos registe
+    warp-cli --accept-tos register
     warp-cli --accept-tos set-mode proxy
     warp-cli --accept-tos set-proxy-port 31303
     warp-cli --accept-tos connect
@@ -2968,7 +2968,7 @@ renewalTLS() {
         certPath=${acmeCertPath}
     fi
 
-    local notAfte
+    local notAfter
     if ! notAfter=$(openssl x509 -in "${certPath}" -noout -enddate 2>/dev/null); then
         echoContent red " ---> 无法读取证书真实到期时间"
         return 1
@@ -3019,7 +3019,7 @@ renewalTLS() {
     if sudo "$HOME/.acme.sh/acme.sh" --cron --home "$HOME/.acme.sh" &&
         sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${acmeInstallDomain}" --fullchainpath "/etc/v2ray-agent/tls/${domain}.crt" --keypath "/etc/v2ray-agent/tls/${domain}.key" --ecc; then
         local newExpiry
-        local newNotAfte
+        local newNotAfter
         if newNotAfter=$(openssl x509 -in "/etc/v2ray-agent/tls/${domain}.crt" -noout -enddate 2>/dev/null); then
             newNotAfter=${newNotAfter#notAfter=}
             if newExpiry=$(date +%s -d "${newNotAfter}" 2>/dev/null) && ((newExpiry > currentTime && newExpiry > expiryTime)); then
@@ -3047,7 +3047,7 @@ renewalTLS() {
 
 # Download and validate the new binary before replacing the installed core.
 installCoreRelease() (
-    local core=$1 version=$2 coreDir archive binary tmpDi
+    local core=$1 version=$2 coreDir archive binary tmpDir
     local -a wgetArgs=(-q)
     [[ "${version}" =~ ^v[0-9][A-Za-z0-9._-]*$ ]] || {
         echoContent red " ---> 无法读取有效的核心版本，保留当前程序"
@@ -3249,7 +3249,7 @@ updateGeoSite() {
     if [[ "${release}" != "alpine" && -n "${wgetShowProgressStatus}" ]]; then
         wgetArgs+=("${wgetShowProgressStatus}")
     fi
-    local geoTempDi
+    local geoTempDir
     mkdir -p "${geoDir}" || return 1
     geoTempDir=$(mktemp -d "${geoDir}.geo.XXXXXX") || return 1
     wget "${wgetArgs[@]}" -P "${geoTempDir}" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geosite.dat" &&
@@ -3861,7 +3861,7 @@ initHysteria2Network() {
 # Port hopping rules are owned per protocol; never flush another firewall's rules.
 validPortHoppingConfig() {
     [[ "$1" == hysteria2 || "$1" == tuic ]] || return 1
-    local numbe
+    local number
     for number in "$2" "$3" "$4" "${5:-60}"; do
         [[ "${number}" =~ ^[0-9]{1,5}$ ]] || return 1
     done
@@ -5112,7 +5112,7 @@ initSingBoxHTTPClientConfig() {
 # 合并config
 singBoxMergeConfig() (
     local configDir=/etc/v2ray-agent/sing-box/conf
-    local tmpDi
+    local tmpDir
     migrateSingBoxConfigs
     if [[ "$1" != preserve ]]; then initSingBoxHTTPClientConfig || return 1; fi
     tmpDir=$(mktemp -d "${configDir}/.merge.XXXXXX") || return 1
@@ -8949,7 +8949,7 @@ showIPv6Routing() {
     if [[ "${coreInstallType}" == "1" ]]; then
         if [[ -f "${configPath}09_routing.json" ]]; then
             echoContent yellow "Xray-core："
-            jq -r -c '.routing.rules[]|select (.outboundTag=="IPv6_out")|.domain' ${configPath}09_routing.json | jq -
+            jq -r -c '.routing.rules[]|select (.outboundTag=="IPv6_out")|.domain' ${configPath}09_routing.json | jq -r
         elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}IPv6_out.json" ]]; then
             echoContent yellow "Xray-core"
             echoContent green " ---> 已设置IPv6全局分流"
@@ -8961,7 +8961,7 @@ showIPv6Routing() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}IPv6_route.json" ]]; then
             echoContent yellow "sing-box"
-            jq -r -c '.route.rules[]|select (.outbound=="IPv6_out")' "${singBoxConfigPath}IPv6_route.json" | jq -
+            jq -r -c '.route.rules[]|select (.outbound=="IPv6_out")' "${singBoxConfigPath}IPv6_route.json" | jq -r
         elif [[ ! -f "${singBoxConfigPath}IPv6_route.json" && -f "${singBoxConfigPath}IPv6_out.json" ]]; then
             echoContent yellow "sing-box"
             echoContent green " ---> 已设置IPv6全局分流"
@@ -9063,7 +9063,7 @@ blacklist() {
 
     read -r -p "请选择:" blacklistStatus
     if [[ "${blacklistStatus}" == "1" ]]; then
-        jq -r -c '.routing.rules[]|select (.outboundTag=="blackhole_out")|.domain' ${configPath}09_routing.json | jq -
+        jq -r -c '.routing.rules[]|select (.outboundTag=="blackhole_out")|.domain' ${configPath}09_routing.json | jq -r
         exit 0
     elif [[ "${blacklistStatus}" == "2" ]]; then
         echoContent red "=============================================================="
@@ -9424,7 +9424,7 @@ EOF
 }
 
 # 添加 sing-box IP 屏蔽路由规则
-# 支持增量合并历史 ip_cid
+# 支持增量合并历史 ip_cidr
 addSingBoxIPRouteRule() {
     local outboundTag=$1
     local ipList=$2
@@ -9587,7 +9587,7 @@ showWireGuardDomain() {
     if [[ "${coreInstallType}" == "1" ]]; then
         if [[ -f "${configPath}09_routing.json" ]]; then
             echoContent yellow "Xray-core"
-            jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -
+            jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -r
         elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}wireguard_out_${type}.json" ]]; then
             echoContent yellow "Xray-core"
             echoContent green " ---> 已设置warp ${type}全局分流"
@@ -9600,7 +9600,7 @@ showWireGuardDomain() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" ]]; then
             echoContent yellow "sing-box"
-            jq -r -c '.route.rules[]' "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" | jq -
+            jq -r -c '.route.rules[]' "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" | jq -r
         elif [[ ! -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" && -f "${singBoxConfigPath}wireguard_endpoints_${type}.json" ]]; then
             echoContent yellow "sing-box"
             echoContent green " ---> 已设置warp ${type}全局分流"
@@ -10269,7 +10269,7 @@ commitSocks5Inbound() (
 
 # Export only connection fields; wildcard listen addresses are not remote endpoints.
 socks5InboundShareConfig() {
-    local inbound=${1:-/etc/v2ray-agent/sing-box/conf/config/20_socks5_inbounds.json} serve
+    local inbound=${1:-/etc/v2ray-agent/sing-box/conf/config/20_socks5_inbounds.json} server
     server=$(jq -er '.inbounds[0].listen' "$inbound") || return 1
     case "$server" in '::' | '0.0.0.0' | '') server=$(getPublicIP) ;; esac
     if [[ -z "$server" ]]; then
@@ -10933,7 +10933,7 @@ socks5OutboundLoad() {
 }
 
 socks5OutboundModern() {
-    local version major mino
+    local version major minor
     version=$("$s5SBin" version 2>/dev/null | sed -nE 's/^sing-box version ([0-9]+)\.([0-9]+).*/\1 \2/p')
     [[ "$version" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
     read -r major minor <<<"$version"
@@ -12845,19 +12845,19 @@ manageAccount() {
         menu
         ;;
     1)
-        viewAccountsByUse
+        viewAccountsByUser
         ;;
     2)
-        viewSubscriptionByUse
+        viewSubscriptionByUser
         ;;
     3)
         subscribe
         ;;
     4)
-        addUse
+        addUser
         ;;
     5)
-        removeUse
+        removeUser
         ;;
     6)
         addSubscribeMenu 1
@@ -12870,7 +12870,7 @@ manageAccount() {
 
 viewAccountsByUser() {
     readInstallType
-    local users tempDi
+    local users tempDir
     users=$(collectAccountUsers) || return 1
     selectAccountUser "${users}" || return 0
     tempDir=$(mktemp -d) || return 1
@@ -12944,7 +12944,7 @@ viewSubscriptionByUser() {
         subscribe || return 1
         readNginxSubscribe
     fi
-    local subscribeSalt emailMd5 currentDomain publishDi
+    local subscribeSalt emailMd5 currentDomain publishDir
     subscribeSalt=$(cat /etc/v2ray-agent/subscribe_local/subscribeSalt) || return 1
     emailMd5=$(printf '%s\n' "${accountSelectionKey}${subscribeSalt}" | md5sum | awk '{print $1}')
     currentDomain=${currentHost}
@@ -13450,7 +13450,7 @@ rule-providers:
     path: ./ruleset/chinamax_domain.yaml
   ChinaMaxIPNoIPv6:
     type: http
-    behavior: ipcid
+    behavior: ipcidr
     interval: 86400
     url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_IP_No_IPv6.yaml
     path: ./ruleset/chinamax_ip.yaml
@@ -14093,19 +14093,19 @@ manageReality() {
     local curSni="" curTargetPort="443" curPublicKey=""
     if [[ "${coreInstallType}" == "1" && -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
         curSni=$(jq -r '.inbounds[1].streamSettings.realitySettings.serverNames[0] // empty' "${configPath}07_VLESS_vision_reality_inbounds.json")
-        local tSt
+        local tStr
         tStr=$(jq -r '.inbounds[1].streamSettings.realitySettings.target // empty' "${configPath}07_VLESS_vision_reality_inbounds.json")
         [[ -n "${tStr}" ]] && curTargetPort=$(echo "${tStr}" | awk -F '[:]' '{print $2}')
         curPublicKey=$(jq -r '.inbounds[1].streamSettings.realitySettings.publicKey // empty' "${configPath}07_VLESS_vision_reality_inbounds.json")
     elif [[ "${coreInstallType}" == "1" && -f "${configPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
         curSni=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
-        local tSt
+        local tStr
         tStr=$(jq -r '.inbounds[0].streamSettings.realitySettings.target // empty' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
         [[ -n "${tStr}" ]] && curTargetPort=$(echo "${tStr}" | awk -F '[:]' '{print $2}')
         curPublicKey=$(jq -r '.inbounds[0].streamSettings.realitySettings.publicKey // empty' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
     elif [[ "${coreInstallType}" == "1" && -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
         curSni=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "${configPath}12_VLESS_XHTTP_inbounds.json")
-        local tSt
+        local tStr
         tStr=$(jq -r '.inbounds[0].streamSettings.realitySettings.target // empty' "${configPath}12_VLESS_XHTTP_inbounds.json")
         [[ -n "${tStr}" ]] && curTargetPort=$(echo "${tStr}" | awk -F '[:]' '{print $2}')
         curPublicKey=$(jq -r '.inbounds[0].streamSettings.realitySettings.publicKey // empty' "${configPath}12_VLESS_XHTTP_inbounds.json")
@@ -14272,7 +14272,7 @@ manageReality() {
     esac
 }
 
-# 安装reality scanne
+# 安装reality scanner
 installRealityScanner() {
     if [[ ! -f "/etc/v2ray-agent/xray/reality_scan/RealiTLScanner-linux-64" ]]; then
         version=$(curl -s https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1 | jq -r '.[]|.tag_name')
@@ -14280,7 +14280,7 @@ installRealityScanner() {
         chmod 655 /etc/v2ray-agent/xray/reality_scan/RealiTLScanner-linux-64
     fi
 }
-# reality scanne
+# reality scanner
 realityScanner() {
     echoContent skyBlue "\n进度 1/1 : 扫描Reality域名"
     echoContent red "\n=============================================================="
