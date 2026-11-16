@@ -1663,7 +1663,7 @@ cleanUp() {
 }
 initVar "$1"
 checkSystem
-checkCPUVendo
+checkCPUVendor
 
 readInstallType
 readInstallProtocolType
