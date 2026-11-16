@@ -33,10 +33,7 @@ echoContent() {
         ${echoType} "\033[94m${printN}$2 \033[0m"
         ;;
     "gray")
-        ${echoType} "\033[37m${printN}$2 \033[0m"
-        ;;
-    "cyan")
-        ${echoType} "\033[36m${printN}$2 \033[0m"
+        ${echoType} "\033[90m${printN}$2 \033[0m"
         ;;
     "white")
         ${echoType} "\033[37m${printN}$2 \033[0m"
@@ -49,66 +46,6 @@ echoContent() {
         ${echoType} "\033[33m${printN}$2 \033[0m"
         ;;
     esac
-}
-
-uiNoticeMsg=""
-
-# Clear screen only when running in an interactive terminal.
-uiClear() {
-    [[ -t 1 ]] && command -v clear >/dev/null 2>&1 && clear
-}
-
-# Print a subtle 64-column horizontal divider.
-uiDivider() {
-    local color=${1:-cyan}
-    [[ "${color}" == "gray" ]] && color="cyan"
-    echoContent "${color}" "────────────────────────────────────────────────────────────────"
-}
-
-# Print a unified submenu header with optional muted subtitle.
-uiHeader() {
-    local title=$1 subtitle=${2:-}
-    printf '\n'
-    uiDivider skyBlue
-    if [[ -n "${subtitle}" ]]; then
-        printf '  \033[1;36m◆ %s\033[0m  \033[37m%s\033[0m\n' "${title}" "${subtitle}"
-    else
-        printf '  \033[1;36m◆ %s\033[0m\n' "${title}"
-    fi
-    uiDivider cyan
-}
-
-# Render a numbered menu row with muted description text.
-uiOption() {
-    local idx=$1 label=$2 hint=${3:-} colorCode=${4:-'\033[93m'}
-    if [[ -n "${hint}" ]]; then
-        printf '  \033[1;36m%s.\033[0m %b%s\033[0m  \033[37m%s\033[0m\n' "${idx}" "${colorCode}" "${label}" "${hint}"
-    else
-        printf '  \033[1;36m%s.\033[0m %b%s\033[0m\n' "${idx}" "${colorCode}" "${label}"
-    fi
-}
-
-# Render consistent 0-return footer bar.
-uiBackOption() {
-    local text=${1:-返回主菜单}
-    uiDivider gray
-    printf '  \033[1;36m0.\033[0m \033[1;36m%s\033[0m\n' "${text}"
-    uiDivider gray
-}
-
-# Pause cleanly so users never drop out to the shell unexpectedly.
-uiPauseReturn() {
-    local prompt=${1:-按回车键继续...} target=${2:-}
-    read -r -p "${prompt}" _
-    [[ -z "${target}" ]] || "${target}"
-}
-
-# Render and clear any transient validation notice right above the prompt.
-uiConsumeNotice() {
-    if [[ -n "${uiNoticeMsg:-}" ]]; then
-        printf '  \033[31m! %s\033[0m\n' "${uiNoticeMsg}"
-        uiNoticeMsg=""
-    fi
 }
 # 检查SELinux状态
 checkCentosSELinux() {
@@ -894,9 +831,7 @@ readInstallProtocolType() {
         fi
         if echo "${row}" | grep -q VLESS_vision_gRPC_inbounds; then
             currentInstallProtocolType="${currentInstallProtocolType}8,"
-            if [[ "${coreInstallType}" == "1" ]]; then
-                [[ -z "${xrayVLESSRealityServerName}" ]] && xrayVLESSRealityServerName=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "${row}.json")
-            elif [[ "${coreInstallType}" == "2" ]]; then
+            if [[ "${coreInstallType}" == "2" ]]; then
                 frontingTypeReality=08_VLESS_vision_gRPC_inbounds
                 singBoxVLESSRealityGRPCPort=$(jq -r .inbounds[0].listen_port "${row}.json")
                 singBoxVLESSRealityGRPCServerName=$(jq -r .inbounds[0].tls.server_name "${row}.json")
@@ -1151,7 +1086,7 @@ syncXrayHysteria2InboundBandwidth() {
     local downSpeed=${1:-0} upSpeed=${2:-0} runTest=${3:-test}
     local xrayHy2File="${configPath:-/etc/v2ray-agent/xray/conf/}06_hysteria2_inbounds.json"
     [[ -f "${xrayHy2File}" ]] || return 0
-    local tmpFile backupFile testDir
+    local tmpFile backupFile testDi
     tmpFile=$(mktemp "${xrayHy2File}.tmp.XXXXXX") || return 1
     backupFile=$(mktemp "${xrayHy2File}.bak.XXXXXX") || {
         rm -f "${tmpFile}"
@@ -1249,7 +1184,7 @@ syncSingBoxHysteria2InboundBandwidth() {
 
     local sbBin="${singBoxConfigPath%/conf/config/}/sing-box"
     if [[ "${runTest}" != "no_test" && -n "${singBoxConfigPath}" && -x "${sbBin}" && "${configFile}" == "${singBoxConfigPath}"* ]]; then
-        local tmpCheckDir
+        local tmpCheckDi
         tmpCheckDir=$(mktemp -d "${TMPDIR:-/tmp}/v2ray-agent-sbcheck.XXXXXX") || tmpCheckDir=""
         if [[ -n "${tmpCheckDir}" ]]; then
             if ! "${sbBin}" merge "${tmpCheckDir}/sing-box.json" -C "${singBoxConfigPath}" -D "${singBoxConfigPath%config/}" >/dev/null 2>&1 ||
@@ -1313,8 +1248,8 @@ readSingBoxConfig() {
         readXrayHysteria2Network || return 1
     fi
     if [[ -n "${hysteriaPort}" ]]; then
-        [[ "${hysteria2ClientUploadSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || hysteria2ClientUploadSpeed=50
-        [[ "${hysteria2ClientDownloadSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || hysteria2ClientDownloadSpeed=100
+        [[ "${hysteria2ClientUploadSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || hysteria2ClientUploadSpeed=0
+        [[ "${hysteria2ClientDownloadSpeed}" =~ ^[0-9]+([.][0-9]+)?$ ]] || hysteria2ClientDownloadSpeed=0
     fi
 }
 
@@ -1403,10 +1338,6 @@ readConfigHostPathUUID() {
             currentDefaultPort=${currentPort}
             currentUUID=$(jq -r '.inbounds[0].settings.users[0].auth // empty' "${hysteriaConfig}")
             currentClients=$(jq -c '.inbounds[0].settings.users // []' "${hysteriaConfig}")
-        elif [[ -z "${frontingType}" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]] && echo "${currentInstallProtocolType}" | grep -q ",6,"; then
-            currentHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
-        elif [[ -z "${frontingType}" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}09_tuic_inbounds.json" ]] && echo "${currentInstallProtocolType}" | grep -q ",9,"; then
-            currentHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}09_tuic_inbounds.json")
         fi
 
         # reality
@@ -1616,40 +1547,11 @@ showInstallStatus() {
             nginxStatusText="未运行"
         fi
 
-        # 读取协议类型
-        readInstallProtocolType
-
-        if [[ -z "${currentHost}" ]] && ! echo "${currentInstallProtocolType}" | grep -qE ",0,|,1,|,2,|,3,|,4,|,5,|,6,|,9,|,10,|,11,|,13,|,14,"; then
-            tlsCertDomain=""
-            tlsCertSummary="免证书/未配置"
-        else
-            getTlsCertStatus >/dev/null 2>&1
-        fi
+        getTlsCertStatus >/dev/null 2>&1
         echoContent "${coreColor}" "  运行核心 : ${coreStatusText}  |  Nginx: ${nginxStatusText}  |  证书: ${tlsCertSummary}"
 
-        local cc qdisc bbrLabel hostLabel hy2ModeTag=""
-        cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
-        qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
-        if [[ "${cc}" == "bbr" ]]; then
-            bbrLabel="BBR(${qdisc:-fq}) 已开启"
-        else
-            bbrLabel="BBR 未开启"
-        fi
-        if [[ -n "${currentHost}" ]]; then
-            hostLabel="域名: ${currentHost}"
-        elif [[ -n "${tlsCertDomain}" ]]; then
-            hostLabel="域名: ${tlsCertDomain}"
-        else
-            hostLabel="模式: 免域名 Reality"
-        fi
-        if echo "${currentInstallProtocolType}" | grep -q ",6," && declare -F isHysteria2SpeedSet >/dev/null 2>&1; then
-            if isHysteria2SpeedSet "${hysteria2ClientDownloadSpeed}" || isHysteria2SpeedSet "${hysteria2ClientUploadSpeed}"; then
-                hy2ModeTag="  |  Hy2: Brutal(${hysteria2ClientDownloadSpeed:-0}/${hysteria2ClientUploadSpeed:-0}M)"
-            else
-                hy2ModeTag="  |  Hy2: 纯 BBR"
-            fi
-        fi
-        echoContent white "  系统环境 : ${bbrLabel}  |  ${hostLabel}${hy2ModeTag}"
+        # 读取协议类型
+        readInstallProtocolType
 
         local -a protoList=()
         local p0="${currentPort}" p4="${currentPort}" p6="${xrayHysteria2Port:-${singBoxHysteria2Port}}" p7="${xrayVLESSRealityPort}"
@@ -1680,37 +1582,27 @@ showInstallStatus() {
         if [[ "${currentInstallProtocolType}" == *",20,"* ]]; then protoList+=("SOCKS5(${singBoxSocks5Port})"); fi
 
         if [[ ${#protoList[@]} -gt 0 ]]; then
-            local lineBuf="" firstLine=true itemCount=0 p
+            local joinedProtos="" p
             for p in "${protoList[@]}"; do
-                if [[ -z "${lineBuf}" ]]; then
-                    lineBuf="${p}"
-                    itemCount=1
-                elif ((itemCount < 2 && ${#lineBuf} + ${#p} + 3 <= 50)); then
-                    lineBuf="${lineBuf} | ${p}"
-                    itemCount=$((itemCount + 1))
+                if [[ -z "${joinedProtos}" ]]; then
+                    joinedProtos="${p}"
                 else
-                    if [[ "${firstLine}" == "true" ]]; then
-                        echoContent yellow "  已装协议 : ${lineBuf}"
-                        firstLine=false
-                    else
-                        echoContent yellow "             ${lineBuf}"
-                    fi
-                    lineBuf="${p}"
-                    itemCount=1
+                    joinedProtos="${joinedProtos} | ${p}"
                 fi
             done
-            if [[ -n "${lineBuf}" ]]; then
-                if [[ "${firstLine}" == "true" ]]; then
-                    echoContent yellow "  已装协议 : ${lineBuf}"
-                else
-                    echoContent yellow "             ${lineBuf}"
-                fi
-            fi
+            echoContent yellow "  已装协议 : ${joinedProtos}"
         else
             echoContent yellow "  已装协议 : 暂无"
         fi
+        if echo "${currentInstallProtocolType}" | grep -q ",6," && declare -F isHysteria2SpeedSet >/dev/null 2>&1; then
+            if isHysteria2SpeedSet "${hysteria2ClientDownloadSpeed}" || isHysteria2SpeedSet "${hysteria2ClientUploadSpeed}"; then
+                echoContent yellow "  Hy2 模式 : Brutal (${hysteria2ClientDownloadSpeed:-0}/${hysteria2ClientUploadSpeed:-0}M)"
+            else
+                echoContent green  "  Hy2 模式 : 纯 BBR (不限速自适应)"
+            fi
+        fi
     else
-        echoContent yellow "  当前状态 : 尚未安装任何代理核心与协议（建议先选「1 -> 1」一键部署）"
+        echoContent yellow "  当前状态 : 尚未安装任何代理核心与协议"
     fi
 }
 
@@ -1771,7 +1663,7 @@ cleanUp() {
 }
 initVar "$1"
 checkSystem
-checkCPUVendor
+checkCPUVendo
 
 readInstallType
 readInstallProtocolType
@@ -1948,7 +1840,7 @@ installTools() {
             echoContent green " ---> 安装nginx"
             installNginxTools || return 1
         else
-            local nginxMajor nginxMinor
+            local nginxMajor nginxMino
             nginxVersion=$(nginx -v 2>&1) || nginxVersion=
             read -r nginxMajor nginxMinor < <(printf '%s\n' "${nginxVersion}" | sed -nE 's@^.*nginx/([0-9]+)\.([0-9]+).*@\1 \2@p')
             if ! [[ "${nginxMajor}" =~ ^[0-9]+$ && "${nginxMinor}" =~ ^[0-9]+$ ]]; then
@@ -2098,7 +1990,7 @@ installWarp() {
         exit 0
     fi
     systemctl enable warp-svc
-    warp-cli --accept-tos register
+    warp-cli --accept-tos registe
     warp-cli --accept-tos set-mode proxy
     warp-cli --accept-tos set-proxy-port 31303
     warp-cli --accept-tos connect
@@ -3076,7 +2968,7 @@ renewalTLS() {
         certPath=${acmeCertPath}
     fi
 
-    local notAfter
+    local notAfte
     if ! notAfter=$(openssl x509 -in "${certPath}" -noout -enddate 2>/dev/null); then
         echoContent red " ---> 无法读取证书真实到期时间"
         return 1
@@ -3127,7 +3019,7 @@ renewalTLS() {
     if sudo "$HOME/.acme.sh/acme.sh" --cron --home "$HOME/.acme.sh" &&
         sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${acmeInstallDomain}" --fullchainpath "/etc/v2ray-agent/tls/${domain}.crt" --keypath "/etc/v2ray-agent/tls/${domain}.key" --ecc; then
         local newExpiry
-        local newNotAfter
+        local newNotAfte
         if newNotAfter=$(openssl x509 -in "/etc/v2ray-agent/tls/${domain}.crt" -noout -enddate 2>/dev/null); then
             newNotAfter=${newNotAfter#notAfter=}
             if newExpiry=$(date +%s -d "${newNotAfter}" 2>/dev/null) && ((newExpiry > currentTime && newExpiry > expiryTime)); then
@@ -3155,7 +3047,7 @@ renewalTLS() {
 
 # Download and validate the new binary before replacing the installed core.
 installCoreRelease() (
-    local core=$1 version=$2 coreDir archive binary tmpDir
+    local core=$1 version=$2 coreDir archive binary tmpDi
     local -a wgetArgs=(-q)
     [[ "${version}" =~ ^v[0-9][A-Za-z0-9._-]*$ ]] || {
         echoContent red " ---> 无法读取有效的核心版本，保留当前程序"
@@ -3284,92 +3176,62 @@ installXray() {
 
 # xray版本管理
 xrayVersionManageMenu() {
-    uiClear
+    echoContent skyBlue "\n========================= Xray-core 管理 ========================="
     if [[ "${coreInstallType}" != "1" ]]; then
-        uiHeader "Xray-core 内核管理"
-        echoContent red "\n  ! 未检测到 Xray-core 安装目录，请先完成安装"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回核心管理..." coreVersionManageMenu
+        echoContent red " ---> 未检测到 Xray-core 安装目录，请先安装 Xray-core"
         return 0
     fi
-    local xrayVer=""
-    if [[ -x "/etc/v2ray-agent/xray/xray" ]]; then
-        xrayVer=$(/etc/v2ray-agent/xray/xray --version 2>/dev/null | head -n 1 | awk '{print $2}')
-    fi
-    uiHeader "Xray-core 内核管理" "${xrayVer:+当前版本: v${xrayVer#v}}"
-    uiOption "1" "升级 Xray-core 正式版" "稳定发布通道 (Stable)" '\033[92m'
-    uiOption "2" "升级 Xray-core 预览版" "新特性测试通道 (Pre-release)"
-    uiOption "3" "回退历史版本" "支持回退最近 5 个正式版本"
-    uiDivider gray
-    uiOption "4" "停止 Xray-core" "停止当前运行进程"
-    uiOption "5" "启动 Xray-core" "启动 Xray-core 服务"
-    uiOption "6" "重启 Xray-core" "重载配置并重启服务"
-    uiDivider gray
-    uiOption "7" "立即更新 Geo 规则库" "更新 GeoSite / GeoIP 路由规则"
-    uiOption "8" "配置每日自动更新 Geo" "安装或调整每日定时更新规则任务"
-    uiOption "9" "运行日志与调试管理" "开关 access 日志、实时查看或清理日志"
-    uiBackOption "返回核心管理"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-9]: " selectXrayType
+    echoContent yellow "  1. 升级 Xray-core 正式版"
+    echoContent yellow "  2. 升级 Xray-core 预览版 (Pre-release)"
+    echoContent yellow "  3. 回退 Xray-core 历史版本"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent yellow "  4. 关闭 Xray-core"
+    echoContent yellow "  5. 启动 Xray-core"
+    echoContent yellow "  6. 重启 Xray-core"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent yellow "  7. 手动更新 GeoSite / GeoIP 规则库"
+    echoContent yellow "  8. 设置每日凌晨自动更新 Geo 规则库"
+    echoContent yellow "  9. 查看 Xray 运行日志"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    read -r -p "请选择 [0-9]: " selectXrayType
     if [[ "${selectXrayType}" == "0" || -z "${selectXrayType}" ]]; then
-        coreVersionManageMenu 1
+        menu
         return 0
     elif [[ "${selectXrayType}" == "1" ]]; then
         prereleaseStatus=false
         updateXray
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "2" ]]; then
         prereleaseStatus=true
         updateXray
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "3" ]]; then
-        echoContent yellow "\n  注意事项："
-        echoContent gray  "    • 仅支持回退最近 5 个正式版本"
-        echoContent gray  "    • 若旧版本不支持当前配置格式可能导致无法启动，请谨慎操作"
-        uiDivider cyan
-        curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50" | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -5 | awk '{print "  "NR": "$0}'
-        uiDivider gray
-        read -r -p "  请输入要回退的序号 [1-5，留空取消]: " selectXrayVersionType
-        if [[ -z "${selectXrayVersionType}" ]]; then
-            xrayVersionManageMenu 1
-            return 0
-        fi
+        echoContent yellow "\n1.只可以回退最近的五个版本"
+        echoContent yellow "2.不保证回退后一定可以正常使用"
+        echoContent yellow "3.如果回退的版本不支持当前的config，则会无法连接，谨慎操作"
+        echoContent skyBlue "------------------------Version-------------------------------"
+        curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50" | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -5 | awk '{print ""NR""":"$0}'
+        echoContent skyBlue "--------------------------------------------------------------"
+        read -r -p "请输入要回退的版本:" selectXrayVersionType
         version=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50" | jq -r '.[] | select(.prerelease == false and .draft == false) | .tag_name' | head -5 | awk '{print ""NR""":"$0}' | grep "${selectXrayVersionType}:" | awk -F "[:]" '{print $2}')
         if [[ -n "${version}" ]]; then
             updateXray "${version}"
-            uiPauseReturn "  按回车键返回 Xray 管理..."
-            xrayVersionManageMenu 1
         else
-            uiNoticeMsg="版本号序号有误，请重新选择 [1-5]"
+            echoContent red "\n ---> 输入有误，请重新输入"
             xrayVersionManageMenu 1
         fi
     elif [[ "${selectXrayType}" == "4" ]]; then
         handleXray stop
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "5" ]]; then
         handleXray start
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "6" ]]; then
         reloadCore
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "7" ]]; then
         updateGeoSite
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "8" ]]; then
         installCronUpdateGeo
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
     elif [[ "${selectXrayType}" == "9" ]]; then
         checkLog 1
-    else
-        uiNoticeMsg="输入编号无效，请输入 [0-9]"
-        xrayVersionManageMenu 1
     fi
 }
 
@@ -3387,7 +3249,7 @@ updateGeoSite() {
     if [[ "${release}" != "alpine" && -n "${wgetShowProgressStatus}" ]]; then
         wgetArgs+=("${wgetShowProgressStatus}")
     fi
-    local geoTempDir
+    local geoTempDi
     mkdir -p "${geoDir}" || return 1
     geoTempDir=$(mktemp -d "${geoDir}.geo.XXXXXX") || return 1
     wget "${wgetArgs[@]}" -P "${geoTempDir}" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geosite.dat" &&
@@ -3999,7 +3861,7 @@ initHysteria2Network() {
 # Port hopping rules are owned per protocol; never flush another firewall's rules.
 validPortHoppingConfig() {
     [[ "$1" == hysteria2 || "$1" == tuic ]] || return 1
-    local number
+    local numbe
     for number in "$2" "$3" "$4" "${5:-60}"; do
         [[ "${number}" =~ ^[0-9]{1,5}$ ]] || return 1
     done
@@ -4445,52 +4307,31 @@ portHoppingMenu() {
     tuic) targetPort=${singBoxTuicPort} ;;
     *) return 1 ;;
     esac
-    uiClear
-    uiHeader "端口跳跃管理 (${type})" "多端口随机轮换转发至 UDP ${targetPort}"
+    echoContent skyBlue "\n======================= 端口跳跃管理 (${type}) ======================="
     local hoppingBackend hoppingStart hoppingEnd hoppingTarget hoppingInterval hoppingFamilies hoppingZone
     if loadPortHoppingConfig "${type}" "${targetPort}"; then
         echoContent green "  当前状态 : 已启用 (${hoppingStart}-${hoppingEnd} -> 端口 ${hoppingTarget} | ${hoppingBackend})"
     else
         echoContent yellow "  当前状态 : 未设置端口跳跃 (当前监听端口: ${targetPort})"
     fi
-    uiDivider gray
-    uiOption 1 "添加端口跳跃" "配置多端口跳跃范围与防火墙转发规则" '\033[92m'
-    uiOption 2 "删除端口跳跃" "移除防火墙跳跃规则并恢复单端口监听" '\033[31m'
-    uiOption 3 "查看端口跳跃详情" "展示当前转发范围、目标端口与间隔"
-    uiBackOption "返回 TUIC 管理"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-3]: " selectPortHoppingStatus
+    echoContent red "================================================================"
+    echoContent yellow "  1. 添加端口跳跃"
+    echoContent yellow "  2. 删除端口跳跃"
+    echoContent yellow "  3. 查看端口跳跃详情"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    read -r -p "请选择 [0-3]: " selectPortHoppingStatus
     case "${selectPortHoppingStatus}" in
     0 | "")
-        manageTuic
         return 0
         ;;
-    1)
-        if addPortHopping "${type}" "${targetPort}"; then
-            readPortHopping "${type}" "${targetPort}"
-            readNginxSubscribe
-            if [[ -n "${subscribePort}" ]]; then
-                subscribe false
-            fi
-        fi
-        uiDivider gray
-        uiPauseReturn "  按回车键返回端口跳跃管理..."
-        portHoppingMenu "${type}"
-        ;;
+    1) addPortHopping "${type}" "${targetPort}" || return 1 ;;
     2)
-        if deletePortHoppingRules "${type}" '' '' "${targetPort}"; then
-            echoContent green " ---> 删除成功"
-            readPortHopping "${type}" "${targetPort}"
-            readNginxSubscribe
-            if [[ -n "${subscribePort}" ]]; then
-                subscribe false
-            fi
-        else
+        deletePortHoppingRules "${type}" '' '' "${targetPort}" || {
             echoContent red " ---> 删除失败，已保留配置以便重试"
-        fi
-        uiDivider gray
-        uiPauseReturn "  按回车键返回端口跳跃管理..."
-        portHoppingMenu "${type}"
+            return 1
+        }
+        echoContent green " ---> 删除成功"
         ;;
     3)
         local hoppingBackend hoppingStart hoppingEnd hoppingTarget hoppingInterval hoppingFamilies hoppingZone
@@ -4500,18 +4341,17 @@ portHoppingMenu() {
         else
             echoContent yellow " ---> 未设置端口跳跃"
         fi
-        uiDivider gray
-        uiPauseReturn "  按回车键返回端口跳跃管理..."
-        portHoppingMenu "${type}"
+        return 0
         ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-3"
-        portHoppingMenu "${type}"
-        ;;
+    *) return 0 ;;
     esac
+    readPortHopping "${type}" "${targetPort}"
+    readNginxSubscribe
+    if [[ -n "${subscribePort}" ]]; then
+        subscribe false
+    fi
 }
 
-# Refresh local links and published subscriptions after Hysteria2 network/port changes.
 refreshHysteria2Subscriptions() {
     readInstallType
     readInstallProtocolType
@@ -4525,23 +4365,17 @@ refreshHysteria2Subscriptions() {
         echoContent green " ---> 远程与本地订阅已自动刷新"
     else
         showAccounts 1 >/dev/null 2>&1 || true
-        echoContent green " ---> 本地账号分享配置已刷新（可在主菜单「2. 账号与订阅管理」查看最新链接）"
+        echoContent green " ---> 本地账号分享配置已刷新（可在主菜单「账号与订阅管理」查看）"
     fi
 }
 
-# Apply updated Hysteria2 expected bandwidth to owning core and refresh subscriptions.
 applyHysteria2Bandwidth() {
     local downSpeed=${1:-0} upSpeed=${2:-0}
     hysteria2ClientDownloadSpeed="${downSpeed}"
     hysteria2ClientUploadSpeed="${upSpeed}"
-    readInstallType
-    readInstallProtocolType
 
     if [[ "${coreInstallType}" == "1" && -f "${configPath}06_hysteria2_inbounds.json" ]]; then
-        saveXrayHysteria2Network || {
-            echoContent red " ---> 保存 Xray Hysteria2 带宽配置失败"
-            return 1
-        }
+        saveXrayHysteria2Network || return 1
         local xrayHy2File="${configPath}06_hysteria2_inbounds.json"
         local preBackup rc=0
         preBackup=$(mktemp "${TMPDIR:-/tmp}/v2ray-agent-hy2bak.XXXXXX") || return 1
@@ -4551,26 +4385,23 @@ applyHysteria2Bandwidth() {
         }
         syncXrayHysteria2InboundBandwidth "${downSpeed}" "${upSpeed}" || rc=$?
         if [[ ${rc} -eq 2 ]]; then
-            rm -f "${preBackup}"
-            echoContent yellow " ---> 当前 Xray-core 版本不支持 finalmask.quicParams，服务端继续保持 BBR，仅将期望带宽写入客户端订阅"
+            echoContent yellow " ---> 当前 Xray-core 版本不支持 finalmask.quicParams，服务端继续保持 BBR，仅同步客户端订阅配置"
         elif [[ ${rc} -ne 0 ]]; then
-            cp -p "${preBackup}" "${xrayHy2File}" >/dev/null 2>&1
             rm -f "${preBackup}"
-            echoContent red " ---> 更新 Xray Hysteria2 配置失败，已回滚原配置"
+            echoContent red " ---> 更新 Xray Hysteria2 带宽配置失败"
             return 1
-        else
-            if ! cmp -s "${preBackup}" "${xrayHy2File}"; then
-                echoContent skyBlue " ---> 正在热重载 Xray-core 服务..."
-                if ! reloadCore transaction xray; then
-                    cp -p "${preBackup}" "${xrayHy2File}" >/dev/null 2>&1
-                    reloadCore transaction xray >/dev/null 2>&1
-                    rm -f "${preBackup}"
-                    echoContent red " ---> Xray-core 重载失败，已自动回滚原配置"
-                    return 1
-                fi
-            fi
-            rm -f "${preBackup}"
         fi
+        if ! cmp -s "${preBackup}" "${xrayHy2File}"; then
+            echoContent skyBlue " ---> 正在热重载 Xray-core 服务..."
+            if ! reloadCore transaction xray; then
+                cp -p "${preBackup}" "${xrayHy2File}" >/dev/null 2>&1
+                reloadCore transaction xray >/dev/null 2>&1
+                rm -f "${preBackup}"
+                echoContent red " ---> Xray-core 重载失败，已自动回滚原配置"
+                return 1
+            fi
+        fi
+        rm -f "${preBackup}"
     elif [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
         local sbHy2File="${singBoxConfigPath}06_hysteria2_inbounds.json"
         local preBackup rc=0
@@ -4614,14 +4445,10 @@ applyHysteria2Bandwidth() {
 }
 
 manageHysteriaPortHopping() {
-    uiClear
     readInstallType
     readInstallProtocolType
     if ! echo "${currentInstallProtocolType}" | grep -q ',6,'; then
-        uiHeader "Hysteria2 协议管理"
-        echoContent yellow "\n  ---> 未检测到已安装的 Hysteria2 入站协议"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回协议与端口管理..." protocolPortMenu
+        echoContent yellow " ---> 未检测到Hysteria2入站"
         return 0
     fi
     readSingBoxConfig || return 1
@@ -4631,25 +4458,21 @@ manageHysteriaPortHopping() {
         ownerCore="sing-box"
     fi
 
-    uiHeader "Hysteria2 协议管理" "承载核心: ${ownerCore}"
-    local hoppingBackend hoppingStart hoppingEnd hoppingTarget hoppingInterval hoppingFamilies hoppingZone
-    if loadPortHoppingConfig hysteria2 "${targetPort}"; then
-        echoContent green  "  端口状态 : 端口跳跃已启用 (${hoppingStart}-${hoppingEnd} -> UDP ${hoppingTarget} | ${hoppingBackend})"
-    else
-        echoContent yellow "  端口状态 : 单端口监听 (UDP ${targetPort}，未启用端口跳跃)"
-    fi
+    echoContent skyBlue "\n======================= Hysteria2 管理 ======================="
+    echoContent green  "  承载核心 : ${ownerCore}  |  当前监听: UDP ${targetPort}"
     echoContent green  "  期望带宽 : $(formatHysteria2SpeedLabel "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}")"
-    uiDivider gray
-    uiOption "1" "启用端口跳跃" "多端口随机轮换抗 UDP QoS"
-    uiOption "2" "移除端口跳跃" "恢复单端口直连监听"
-    uiOption "3" "查看跳跃详情" "查看转发规则与跳跃间隔"
-    uiDivider gray
-    uiOption "4" "自定义期望带宽" "设置上/下行 Mbps，填 0 走 BBR" '\033[92m'
-    uiOption "5" "一键切换纯 BBR" "设为 0/0 不限速，客户端与服务端均走 BBR" '\033[92m'
-    uiBackOption "返回协议与端口管理"
-    uiConsumeNotice
+    echoContent red "================================================================"
+    echoContent yellow "  1. 启用端口跳跃   (多端口随机轮换抗 UDP QoS)"
+    echoContent yellow "  2. 移除端口跳跃   (恢复单端口直连监听)"
+    echoContent yellow "  3. 查看跳跃详情   (查看转发规则与跳跃间隔)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent green  "  4. 自定义期望带宽 (设置上/下行 Mbps，填 0 走 BBR)"
+    echoContent green  "  5. 一键切换纯 BBR (设为 0/0 不限速，客户端与服务端均走 BBR)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回协议与端口管理"
+    echoContent red "================================================================"
     local selectHy2Action
-    read -r -p "  请选择 [0-5]: " selectHy2Action
+    read -r -p "请选择 [0-5]: " selectHy2Action
     case "${selectHy2Action}" in
     0 | "")
         protocolPortMenu
@@ -4659,7 +4482,7 @@ manageHysteriaPortHopping() {
             readPortHopping hysteria2 "${targetPort}"
             refreshHysteria2Subscriptions
         fi
-        uiPauseReturn "  按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        manageHysteriaPortHopping
         ;;
     2)
         if deletePortHoppingRules hysteria2 '' '' "${targetPort}"; then
@@ -4669,28 +4492,23 @@ manageHysteriaPortHopping() {
         else
             echoContent red " ---> 删除失败，已保留配置以便重试"
         fi
-        uiPauseReturn "  按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        manageHysteriaPortHopping
         ;;
     3)
-        if loadPortHoppingConfig hysteria2 "${targetPort}"; then
-            echoContent green " ---> 当前范围: ${hoppingStart}-${hoppingEnd}，转发端口: ${hoppingTarget}，防火墙: ${hoppingBackend}"
-            echoContent green " ---> 跳跃间隔: ${hoppingInterval}秒"
-        else
-            echoContent yellow " ---> 未设置端口跳跃"
-        fi
-        uiPauseReturn "  按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        showPortHopping hysteria2 "${targetPort}"
+        manageHysteriaPortHopping
         ;;
     4)
         initHysteria2Network "${hysteria2ClientDownloadSpeed:-100}" "${hysteria2ClientUploadSpeed:-50}"
         applyHysteria2Bandwidth "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}"
-        uiPauseReturn "  按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        manageHysteriaPortHopping
         ;;
     5)
         applyHysteria2Bandwidth 0 0
-        uiPauseReturn "  按回车键返回 Hysteria2 管理..." manageHysteriaPortHopping
+        manageHysteriaPortHopping
         ;;
     *)
-        uiNoticeMsg="输入编号无效，请输入 [0-5]"
+        echoContent red " ---> 输入编号无效，请重新输入 [0-5]"
         manageHysteriaPortHopping
         ;;
     esac
@@ -5158,6 +4976,8 @@ initSingBoxHysteria2Config() {
             "listen": "::",
             "listen_port": ${hysteriaPort},
             "users": $(initXrayClients 6),
+            "up_mbps":${hysteria2ClientDownloadSpeed},
+            "down_mbps":${hysteria2ClientUploadSpeed},
             "tls": {
                 "enabled": true,
                 "server_name":"${currentHost}",
@@ -5178,7 +4998,7 @@ EOF
 singBoxTuicInstall() {
     if ! echo "${currentInstallProtocolType}" | grep -qE ",0,|,1,|,2,|,3,|,4,|,5,|,6,|,9,|,10,|,13,|,14,"; then
         echoContent red "\n ---> 由于需要依赖证书，如安装Tuic，请先安装带有TLS标识协议"
-        return 1
+        exit 0
     fi
 
     totalProgress=5
@@ -5292,7 +5112,7 @@ initSingBoxHTTPClientConfig() {
 # 合并config
 singBoxMergeConfig() (
     local configDir=/etc/v2ray-agent/sing-box/conf
-    local tmpDir
+    local tmpDi
     migrateSingBoxConfigs
     if [[ "$1" != preserve ]]; then initSingBoxHTTPClientConfig || return 1; fi
     tmpDir=$(mktemp -d "${configDir}/.merge.XXXXXX") || return 1
@@ -6223,6 +6043,8 @@ EOF
             "listen": "::",
             "listen_port": ${result[-1]},
             "users": $(initSingBoxClients 6),
+            "up_mbps":${hysteria2ClientDownloadSpeed},
+            "down_mbps":${hysteria2ClientUploadSpeed},
             "tls": {
                 "enabled": true,
                 "server_name":"${sslDomain}",
@@ -6968,32 +6790,25 @@ collectAccountUsers() {
 }
 
 selectAccountUser() {
-    local users=$1 count index selected i key
+    local users=$1 count index selected
     count=$(jq 'length' <<<"${users}") || return 1
     ((count > 0)) || {
-        uiNoticeMsg="当前没有可查看的用户（请先安装节点或添加账号）"
+        echoContent yellow " ---> 没有可查看的用户"
         return 2
     }
     while :; do
-        uiClear
-        uiHeader "选择操作账号" "选择要查看节点详情或导出订阅的账号"
-        for ((i = 0; i < count; i++)); do
-            key=$(jq -r --argjson idx "${i}" '.[$idx].key' <<<"${users}") || return 1
-            uiOption $((i + 1)) "${key}"
-        done
-        uiBackOption "返回账号管理"
-        uiConsumeNotice
-        read -r -p "  请选择 [0-${count}]: " selected || return 2
+        echoContent skyBlue "\n请选择要查看的用户:"
+        jq -r 'to_entries[] | "\(.key + 1).\(.value.key)"' <<<"${users}"
+        read -r -p "请输入:" selected || return 2
         case "${selected}" in
-        0 | '') return 2 ;;
-        *[!0-9]*) uiNoticeMsg="输入无效，请输入 0-${count} 之间的数字" ;;
+        '' | *[!0-9]*) echoContent red " ---> 选择无效，请重试" ;;
         *)
             index=$((10#${selected}))
             if ((index >= 1 && index <= count)); then
                 accountSelectionKey=$(jq -r --argjson index "$((index - 1))" '.[$index].key' <<<"${users}") || return 1
                 return 0
             fi
-            uiNoticeMsg="输入无效，请输入 0-${count} 之间的数字"
+            echoContent red " ---> 选择无效，请重试"
             ;;
         esac
     done
@@ -7428,62 +7243,61 @@ addNginx302() {
 # 更新伪装站
 updateNginxBlog() {
     if [[ "${coreInstallType}" == "2" ]]; then
-        uiClear
-        uiHeader "更换伪装站点"
-        echoContent yellow "\n  ! 此功能仅支持 Xray-core 内核"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
-        return 0
+        echoContent red "\n ---> 此功能仅支持Xray-core内核"
+        exit 0
     fi
+
+    echoContent skyBlue "\n进度 $1/${totalProgress} : 更换伪装站点"
 
     if ! echo "${currentInstallProtocolType}" | grep -q ",0," || [[ -z "${coreInstallType}" ]]; then
-        uiClear
-        uiHeader "更换伪装站点"
-        echoContent red "\n  ! 由于环境依赖，请先安装 Xray-core 的 VLESS_TCP_TLS_Vision"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
-        return 0
+        echoContent red "\n ---> 由于环境依赖，请先安装Xray-core的VLESS_TCP_TLS_Vision"
+        exit 0
     fi
+    echoContent red "=============================================================="
+    echoContent yellow "# 如需自定义，请手动复制模版文件到 ${nginxStaticPath} \n"
+    echoContent yellow "1.新手引导"
+    echoContent yellow "2.游戏网站"
+    echoContent yellow "3.个人博客01"
+    echoContent yellow "4.企业站"
+    echoContent yellow "5.解锁加密的音乐文件模版[https://github.com/ix64/unlock-music]"
+    echoContent yellow "6.mikutap[https://github.com/HFIProgramming/mikutap]"
+    echoContent yellow "7.企业站02"
+    echoContent yellow "8.个人博客02"
+    echoContent yellow "9.404自动跳转baidu"
+    echoContent yellow "10.302重定向网站"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "0. 返回站点与证书管理"
+    echoContent red "=============================================================="
+    read -r -p "请选择 [0-10]: " selectInstallNginxBlogType
 
-    uiClear
-    uiHeader "更换伪装站点" "静态伪装模板或外部 302 重定向（自定义模板可放至 ${nginxStaticPath}）"
-    uiOption 1  "新手引导" "简洁静态引导页模板"
-    uiOption 2  "游戏网站" "游戏门户风格静态模板"
-    uiOption 3  "个人博客 01" "静态个人博客模板"
-    uiOption 4  "企业站 01" "企业官网风格静态模板"
-    uiOption 5  "音乐解锁工具" "unlock-music 开源前端模板"
-    uiOption 6  "Mikutap 互动页" "音频互动静态网页模板"
-    uiOption 7  "企业站 02" "新版企业官网静态模板"
-    uiOption 8  "个人博客 02" "极简博客静态模板"
-    uiOption 9  "404 自动跳转" "404 页面自动跳转 baidu"
-    uiOption 10 "302 重定向网站" "配置或移除外部域名 302 跳转（优先级高于静态站）" '\033[92m'
-    uiBackOption "返回站点与证书管理"
-    uiConsumeNotice
-
-    local selectInstallNginxBlogType
-    read -r -p "  请选择 [0-10]: " selectInstallNginxBlogType
     if [[ "${selectInstallNginxBlogType}" == "0" || -z "${selectInstallNginxBlogType}" ]]; then
         siteCertMenu
         return 0
     fi
 
     if [[ "${selectInstallNginxBlogType}" == "10" ]]; then
+        if [[ "${coreInstallType}" == "2" ]]; then
+            echoContent red "\n ---> 此功能仅支持Xray-core内核，请等待后续更新"
+            updateNginxBlog 1
+            return 0
+        fi
         while :; do
-            uiClear
-            uiHeader "302 重定向网站配置" "配置后根路由将直接 302 跳转至目标站点，优先级高于本地伪装站"
-            uiOption 1 "添加 / 更新 302 重定向" "输入目标重定向 URL，例如 https://www.baidu.com" '\033[92m'
-            uiOption 2 "删除 302 重定向" "恢复使用本地静态伪装站点" '\033[31m'
-            uiBackOption "返回伪装站点菜单"
-            uiConsumeNotice
-            local redirectStatus
-            read -r -p "  请选择 [0-2]: " redirectStatus
+            echoContent red "\n=============================================================="
+            echoContent yellow "重定向的优先级更高，配置302之后如果更改伪装站点，根路由下伪装站点将不起作用"
+            echoContent yellow "如想要伪装站点实现作用需删除302重定向配置\n"
+            echoContent yellow "1.添加"
+            echoContent yellow "2.删除"
+            echoContent skyBlue "--------------------------------------------------------------"
+            echoContent skyBlue "0.返回伪装站点菜单"
+            echoContent red "=============================================================="
+            read -r -p "请选择 [0-2]: " redirectStatus
 
             if [[ "${redirectStatus}" == "0" || -z "${redirectStatus}" ]]; then
                 updateNginxBlog 1
                 return 0
             elif [[ "${redirectStatus}" == "1" ]]; then
                 backupNginxConfig backup
-                read -r -p "  请输入要重定向的域名 (例如 https://www.baidu.com，留空取消): " redirectDomain
+                read -r -p "请输入要重定向的域名,例如 https://www.baidu.com (留空取消):" redirectDomain
                 if [[ -z "${redirectDomain}" ]]; then
                     continue
                 fi
@@ -7494,23 +7308,19 @@ updateNginxBlog() {
                 if ! isNginxRunning; then
                     backupNginxConfig restoreBackup
                     handleNginx start
-                    echoContent red "\n  ! Nginx 重启校验失败，已自动回滚原配置"
-                    uiDivider gray
-                    uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
+                    updateNginxBlog 1
                     return 0
                 fi
                 checkNginx302
-                uiDivider gray
-                uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
+                updateNginxBlog 1
                 return 0
             elif [[ "${redirectStatus}" == "2" ]]; then
                 removeNginx302
-                echoContent green "\n  ---> 移除 302 重定向成功"
-                uiDivider gray
-                uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
+                echoContent green " ---> 移除302重定向成功"
+                updateNginxBlog 1
                 return 0
             else
-                uiNoticeMsg="302 菜单输入无效，请输入 0-2"
+                echoContent red " ---> 输入无效，请输入 0-2"
             fi
         done
     fi
@@ -7525,11 +7335,9 @@ updateNginxBlog() {
 
         unzip -o "${nginxStaticPath}html${selectInstallNginxBlogType}.zip" -d "${nginxStaticPath}" >/dev/null
         rm -f "${nginxStaticPath}html${selectInstallNginxBlogType}.zip*"
-        echoContent green "\n  ---> 更换伪站成功"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回伪装站点菜单..." updateNginxBlog
+        echoContent green " ---> 更换伪站成功"
     else
-        uiNoticeMsg="输入无效，请输入 0-10"
+        echoContent red " ---> 选择错误，请重新选择"
         updateNginxBlog
     fi
 }
@@ -7831,14 +7639,13 @@ appendExtraHealthPort() {
 
 # 节点健康自检面板
 nodeHealthCheck() {
-    uiClear
     readInstallType
     readInstallProtocolType
     readConfigHostPathUUID
     readSingBoxConfig >/dev/null 2>&1
     readNginxSubscribe >/dev/null 2>&1
 
-    uiHeader "节点健康自检面板" "5 维实时体检"
+    echoContent skyBlue "\n========================= 节点健康自检面板 ========================="
 
     # 1. 核心进程与内存占用
     echoContent yellow "  [1/5] 核心进程与服务状态"
@@ -8005,8 +7812,8 @@ nodeHealthCheck() {
         echoContent white "    本机防火墙 : 无活跃 ufw/firewalld 或由 iptables/nftables 托管"
     fi
 
-    uiDivider gray
-    read -r -p "  按回车键返回主菜单..." _
+    echoContent red "=================================================================="
+    read -r -p "按回车键返回主菜单..." _
     menu
 }
 
@@ -8019,13 +7826,13 @@ portManagement() {
     readNginxSubscribe
 
     if [[ -z "${coreInstallType}" && -z "${singBoxConfigPath}" && -z "${subscribePort}" ]]; then
-        uiClear
-        uiHeader "全局端口管理"
-        echoContent red "\n  ! 未检测到任何已安装的服务或协议！"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回协议与端口管理..." protocolPortMenu
+        echoContent red "\n ---> 未检测到任何已安装的服务或协议！"
         return 0
     fi
+
+    echoContent skyBlue "\n=========================== 端口管理 ==========================="
+    echoContent yellow "提示：修改端口后，脚本将自动更新配置文件、放行防火墙、重启服务并刷新订阅"
+    echoContent red "================================================================"
 
     collectInstalledPorts
 
@@ -8036,35 +7843,30 @@ portManagement() {
     local -a protocolCores=("${collectedProtoCores[@]}")
     local index=${#protocolNames[@]}
 
-    uiClear
-    uiHeader "全局端口管理" "修改后自动更新配置、放行防火墙、重启服务并刷新订阅"
+    local i
+    for ((i = 0; i < index; i++)); do
+        echoContent yellow "$((i + 1)). ${protocolNames[i]} 当前端口: ${protocolPorts[i]}${collectedProtoHops[i]}"
+    done
 
     if [[ ${index} -eq 0 ]]; then
-        echoContent red "\n  ! 未找到可管理的协议端口"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回协议与端口管理..." protocolPortMenu
+        echoContent red " ---> 未找到可管理的协议端口"
         return 0
     fi
 
-    local i
-    for ((i = 0; i < index; i++)); do
-        uiOption $((i + 1)) "${protocolNames[i]}" "当前端口: ${protocolPorts[i]}${collectedProtoHops[i]}"
-    done
-
-    uiBackOption "返回协议与端口管理"
-    uiConsumeNotice
+    echoContent red "================================================================"
+    echoContent skyBlue "0. 返回主菜单"
+    echo
     local selectedIndex
-    read -r -p "  请选择要修改端口的序号 [0-${index}]: " selectedIndex
+    read -r -p "请选择要修改端口的序号 [0-${index}]: " selectedIndex
 
     if [[ "${selectedIndex}" == "0" || -z "${selectedIndex}" ]]; then
-        protocolPortMenu
+        menu
         return 0
     fi
 
     if ! [[ "${selectedIndex}" =~ ^[1-9][0-9]*$ ]] || ((selectedIndex > index)); then
-        uiNoticeMsg="输入无效，请输入 0-${index} 之间的数字"
-        portManagement
-        return 0
+        echoContent red " ---> 输入错误，无效的序号"
+        return 1
     fi
 
     local targetIdx=$((selectedIndex - 1))
@@ -8074,23 +7876,17 @@ portManagement() {
     local targetType="${protocolTypes[targetIdx]}"
     local targetCore="${protocolCores[targetIdx]}"
 
-    echoContent skyBlue "\n  正在修改: ${targetName} (当前端口: ${oldPort})"
+    echoContent skyBlue "\n正在修改: ${targetName} (当前端口: ${oldPort})"
     local newPort
-    read -r -p "  请输入新的端口号 (1-65535，留空取消): " newPort
-    if [[ -z "${newPort}" ]]; then
-        portManagement
-        return 0
-    fi
+    read -r -p "请输入新的端口号 (1-65535): " newPort
 
     if ! [[ "${newPort}" =~ ^[0-9]{1,5}$ ]] || ((newPort < 1 || newPort > 65535)); then
-        uiNoticeMsg="端口必须是 1 到 65535 之间的纯数字"
-        portManagement
-        return 0
+        echoContent red " ---> 端口必须是 1 到 65535 之间的纯数字！"
+        return 1
     fi
 
     if [[ "${newPort}" == "${oldPort}" ]]; then
-        uiNoticeMsg="新端口 (${newPort}) 与当前端口相同，未做修改"
-        portManagement
+        echoContent yellow " ---> 新端口与当前端口相同，无需修改。"
         return 0
     fi
 
@@ -8103,9 +7899,8 @@ portManagement() {
             portCheck=$(lsof -iTCP:"${newPort}" -sTCP:LISTEN -P -n 2>/dev/null)
         fi
         if [[ -n "${portCheck}" ]]; then
-            uiNoticeMsg="端口 ${newPort} 已被其他程序占用，请更换端口"
-            portManagement
-            return 0
+            echoContent red " ---> 警告：检测到端口 ${newPort} 已被其他程序占用，请更换端口！"
+            return 1
         fi
     fi
 
@@ -8170,13 +7965,11 @@ portManagement() {
         subscribe false false >/dev/null 2>&1
     fi
 
-    printf '\n'
-    uiDivider green
-    echoContent brightGreen "  ✓ ${targetName} 端口已由 [${oldPort}] 更改为 [${newPort}]"
-    echoContent white       "    • 服务已正常启动，防火墙与订阅已自动同步更新"
-    echoContent gray        "    • 请在 v2rayNG / Clash 等客户端中执行【更新订阅】生效"
-    uiDivider green
-    uiPauseReturn "  按回车键返回全局端口管理..." portManagement
+    echoContent green "\n================================================================"
+    echoContent green " ---> 成功！${targetName} 端口已由 [${oldPort}] 更改为 [${newPort}]"
+    echoContent green " ---> 服务已正常启动，订阅已自动同步更新！"
+    echoContent yellow " ---> 请在 v2rayNG / Clash 等客户端中执行【更新订阅】即可立即生效。"
+    echoContent green "================================================================\n"
 }
 
 # 添加新端口
@@ -8320,11 +8113,11 @@ EOF
 
 # 卸载脚本
 unInstall() {
-    read -r -p "  是否确认卸载安装内容？[y/n]: " unInstallStatus
+    read -r -p "是否确认卸载安装内容？[y/n]:" unInstallStatus
     if [[ "${unInstallStatus}" != "y" ]]; then
         echoContent green " ---> 放弃卸载"
-        scriptMaintainMenu
-        return 0
+        menu
+        exit 0
     fi
     removeAllPortHopping || {
         echoContent red " ---> 端口跳跃清理失败，已停止卸载，请检查防火墙后重试"
@@ -8379,30 +8172,25 @@ unInstall() {
 
 # CDN节点管理
 manageCDN() {
-    uiClear
-    uiHeader "CDN 优选节点管理" "为 WS / gRPC / HTTPUpgrade 协议配置 Cloudflare 等优选域名或 IP"
+    echoContent skyBlue "\n进度 $1/1 : CDN节点管理"
     local setCDNDomain=
 
     if echo "${currentInstallProtocolType}" | grep -qE ",1,|,2,|,3,|,5,|,11,"; then
-        echoContent gray "  教程地址: https://www.v2ray-agent.com/archives/cloudflarezi-xuan-ip"
-        echoContent yellow "  提示: 如对 Cloudflare 优选不了解，建议保持默认，不要随意修改"
-        uiDivider gray
-        uiOption 1 "CNAME www.digitalocean.com" "推荐优选 CNAME 域名 1"
-        uiOption 2 "CNAME who.int" "推荐优选 CNAME 域名 2"
-        uiOption 3 "CNAME blog.hostmonit.com" "推荐优选 CNAME 域名 3"
-        uiOption 4 "CNAME www.visa.com.hk" "推荐优选 CNAME 域名 4"
-        uiOption 5 "手动输入优选 IP / 域名" "支持多个，用英文逗号分隔，如 1.1.1.1,cloudflare.com" '\033[92m'
-        uiOption 6 "移除已配置的 CDN 节点" "恢复使用原站点域名连接" '\033[31m'
-        uiBackOption "返回站点与证书管理"
-        uiConsumeNotice
+        echoContent red "=============================================================="
+        echoContent yellow "# 注意事项"
+        echoContent yellow "\n教程地址:"
+        echoContent skyBlue "https://www.v2ray-agent.com/archives/cloudflarezi-xuan-ip"
+        echoContent red "\n如对Cloudflare优化不了解，请不要使用"
 
-        local selectCDNType
-        read -r -p "  请选择 [0-6]: " selectCDNType
+        echoContent yellow "1.CNAME www.digitalocean.com"
+        echoContent yellow "2.CNAME who.int"
+        echoContent yellow "3.CNAME blog.hostmonit.com"
+        echoContent yellow "4.CNAME www.visa.com.hk"
+        echoContent yellow "5.手动输入[可输入多个，比如: 1.1.1.1,1.1.2.2,cloudflare.com 逗号分隔]"
+        echoContent yellow "6.移除CDN节点"
+        echoContent red "=============================================================="
+        read -r -p "请选择:" selectCDNType
         case ${selectCDNType} in
-        0 | "")
-            siteCertMenu
-            return 0
-            ;;
         1)
             setCDNDomain="www.digitalocean.com"
             ;;
@@ -8416,40 +8204,28 @@ manageCDN() {
             setCDNDomain="www.visa.com.hk"
             ;;
         5)
-            read -r -p "  请输入想要自定义的 CDN IP 或域名 [留空取消]: " setCDNDomain
-            if [[ -z "${setCDNDomain}" ]]; then
-                manageCDN 1
-                return 0
-            fi
+            read -r -p "请输入想要自定义CDN IP或者域名:" setCDNDomain
             ;;
         6)
             echo >/etc/v2ray-agent/cdn
-            echoContent green "\n  ---> 移除 CDN 优选配置成功"
-            uiDivider gray
-            uiPauseReturn "  按回车键返回 CDN 管理..."
-            manageCDN 1
-            return 0
-            ;;
-        *)
-            uiNoticeMsg="输入无效，请输入 0-6"
-            manageCDN 1
-            return 0
+            echoContent green " ---> 移除成功"
+            exit 0
             ;;
         esac
 
         if [[ -n "${setCDNDomain}" ]]; then
+            echo >/etc/v2ray-agent/cdn
             echo "${setCDNDomain}" >"/etc/v2ray-agent/cdn"
-            echoContent green "\n  ---> 修改 CDN 优选节点成功: ${setCDNDomain}"
+            echoContent green " ---> 修改CDN成功"
             subscribe false false
-            uiDivider gray
-            uiPauseReturn "  按回车键返回 CDN 管理..."
+        else
+            echoContent red " ---> 不可以为空，请重新输入"
             manageCDN 1
         fi
     else
-        echoContent gray "  教程地址: https://www.v2ray-agent.com/archives/cloudflarezi-xuan-ip"
-        echoContent yellow "\n  ! 未检测到可用协议（仅支持 WS / gRPC / HTTPUpgrade 等 CDN 协议）"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
+        echoContent yellow "\n教程地址:"
+        echoContent skyBlue "https://www.v2ray-agent.com/archives/cloudflarezi-xuan-ip\n"
+        echoContent red " ---> 未检测到可以使用的协议，仅支持ws、grpc、HTTPUpgrade相关的协议"
     fi
 }
 # 自定义uuid
@@ -8512,16 +8288,11 @@ customUserEmail() {
 
 # 添加用户
 addUser() {
-    read -r -p "  请输入要添加的用户数量 [留空取消]: " userNum
+    read -r -p "请输入要添加的用户数量:" userNum
     echo
-    if [[ -z "${userNum}" ]]; then
-        manageAccount 1
-        return 0
-    fi
-    if ! [[ "${userNum}" =~ ^[1-9][0-9]*$ ]]; then
-        uiNoticeMsg="用户数量必须是大于 0 的整数"
-        manageAccount 1
-        return 0
+    if [[ -z ${userNum} || ${userNum} -le 0 ]]; then
+        echoContent red " ---> 输入有误，请重新输入"
+        exit 0
     fi
     local userConfig=
     if [[ "${coreInstallType}" == "1" ]]; then
@@ -8917,79 +8688,56 @@ handleFirewall() {
 
 # 安装BBR
 bbrInstall() {
-    uiClear
-    uiHeader "BBR 内核拥塞控制与加速" "推荐选择原版 BBR + FQ 队列算法"
-    echoContent gray "  第三方内核管理脚本由 ylx2016 维护 (github.com/ylx2016/Linux-NetSpeed)"
-    uiDivider gray
-    uiOption 1 "安装 / 切换 BBR 内核加速" "按脚本提示选择原版 BBR + FQ 即可" '\033[92m'
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-1]: " installBBRStatus
-    case "${installBBRStatus}" in
-    1)
+    echoContent red "\n=============================================================="
+    echoContent green "BBR、DD脚本用的[ylx2016]的成熟作品，地址[https://github.com/ylx2016/Linux-NetSpeed]，请熟知"
+    echoContent yellow "  1. 安装 BBR / 内核加速脚本【推荐原版 BBR+FQ】"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "=============================================================="
+    read -r -p "请选择 [0-1]:" installBBRStatus
+    if [[ "${installBBRStatus}" == "1" ]]; then
         wget -O tcpx.sh "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh
-        uiPauseReturn "  按回车键返回主菜单..." menu
-        ;;
-    0 | "")
+    else
         menu
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0 或 1"
-        bbrInstall
-        ;;
-    esac
+    fi
 }
 
 # 查看、检查日志
 checkLog() {
     if [[ "${coreInstallType}" == "2" ]]; then
-        uiClear
-        uiHeader "Xray 运行日志与调试"
-        echoContent yellow "\n  ! 此功能仅支持 Xray-core 内核（sing-box 请使用核心管理菜单）"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
-        return 0
+        echoContent red "\n ---> 此功能仅支持Xray-core内核"
+        exit 0
     fi
     if [[ -z "${configPath}" && -z "${realityStatus}" ]]; then
-        uiClear
-        uiHeader "Xray 运行日志与调试"
-        echoContent red "\n  ! 没有检测到 Xray 安装目录，请先完成节点部署"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 Xray 管理..."
-        xrayVersionManageMenu 1
-        return 0
+        echoContent red " ---> 没有检测到安装目录，请执行脚本安装内容"
+        exit 0
     fi
     local realityLogShow=
     local logStatus=false
-    if grep -q "access" "${configPath}00_log.json" 2>/dev/null; then
+    if grep -q "access" ${configPath}00_log.json; then
         logStatus=true
     fi
 
-    uiClear
-    uiHeader "Xray 运行日志与调试" "建议仅在排查问题时临时开启 access 日志"
-    if [[ "${logStatus}" == "false" ]]; then
-        uiOption 1 "开启 access 日志" "记录详细访问记录并设 loglevel=debug" '\033[92m'
-    else
-        uiOption 1 "关闭 access 日志" "关闭访问日志并恢复 loglevel=warning" '\033[31m'
-    fi
-    uiOption 2 "实时监听 access 日志" "持续输出 access.log（按 Ctrl+C 退出）"
-    uiOption 3 "实时监听 error 日志" "持续输出 error.log（按 Ctrl+C 退出）"
-    uiOption 4 "查看证书定时任务日志" "查看最近 100 行 crontab_tls.log"
-    uiOption 5 "查看证书安装日志" "查看最近 100 行 acme.log"
-    uiOption 6 "清空运行日志" "清空 access.log 与 error.log"
-    uiBackOption "返回 Xray 管理"
-    uiConsumeNotice
+    echoContent skyBlue "\n功能 $1/${totalProgress} : 查看日志"
+    echoContent red "\n=============================================================="
+    echoContent yellow "# 建议仅调试时打开access日志\n"
 
-    local selectAccessLogType
-    read -r -p "  请选择 [0-6]: " selectAccessLogType
+    if [[ "${logStatus}" == "false" ]]; then
+        echoContent yellow "1.打开access日志"
+    else
+        echoContent yellow "1.关闭access日志"
+    fi
+
+    echoContent yellow "2.监听access日志"
+    echoContent yellow "3.监听error日志"
+    echoContent yellow "4.查看证书定时任务日志"
+    echoContent yellow "5.查看证书安装日志"
+    echoContent yellow "6.清空日志"
+    echoContent red "=============================================================="
+
+    read -r -p "请选择:" selectAccessLogType
     local configPathLog=${configPath//conf\//}
 
     case ${selectAccessLogType} in
-    0 | "")
-        xrayVersionManageMenu 1
-        return 0
-        ;;
     1)
         if [[ "${logStatus}" == "false" ]]; then
             realityLogShow=true
@@ -9038,31 +8786,13 @@ EOF
             touch /etc/v2ray-agent/crontab_tls.log
         fi
         tail -n 100 /etc/v2ray-agent/crontab_tls.log
-        uiDivider gray
-        uiPauseReturn "  按回车键返回日志管理..."
-        checkLog 1
         ;;
     5)
-        if [[ -f "/etc/v2ray-agent/tls/acme.log" ]]; then
-            tail -n 100 /etc/v2ray-agent/tls/acme.log
-        else
-            echoContent yellow "\n  ---> 暂无 acme.log 日志记录"
-        fi
-        uiDivider gray
-        uiPauseReturn "  按回车键返回日志管理..."
-        checkLog 1
+        tail -n 100 /etc/v2ray-agent/tls/acme.log
         ;;
     6)
         echo >"${configPathLog}access.log"
         echo >"${configPathLog}error.log"
-        echoContent green "\n  ---> 日志已清空"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回日志管理..."
-        checkLog 1
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-6"
-        checkLog 1
         ;;
     esac
 }
@@ -9099,60 +8829,38 @@ checkIPv6() {
     currentIPv6IP=$(curl -s -6 -m 4 http://www.cloudflare.com/cdn-cgi/trace | grep "ip" | cut -d "=" -f 2)
 
     if [[ -z "${currentIPv6IP}" ]]; then
-        echoContent red " ---> 未检测到本机可用 IPv6 出口"
-        return 1
+        echoContent red " ---> 不支持ipv6"
+        exit 0
     fi
 }
 
 # ipv6 分流
 ipv6Routing() {
     if [[ -z "${configPath}" ]]; then
-        uiClear
-        uiHeader "IPv6 原生路由分流"
-        echoContent red "\n  ! 未检测到已安装的节点配置，请先部署节点"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回智能分流菜单..." routingToolsMenu
-        return 0
+        echoContent red " ---> 未安装，请使用脚本安装"
+        menu
+        exit 0
     fi
 
-    uiClear
-    uiHeader "IPv6 原生路由分流" "指定域名优先走本机原生 IPv6 出站，或启用全局 IPv6"
-    if ! checkIPv6; then
-        uiDivider gray
-        uiPauseReturn "  按回车键返回智能分流菜单..." routingToolsMenu
-        return 0
-    fi
-    echoContent green "  本机 IPv6 : ${currentIPv6IP}"
-    uiDivider gray
-    uiOption 1 "查看已分流域名" "展示当前走 IPv6 出口的域名与全局状态"
-    uiOption 2 "添加分流域名" "指定域名路由至原生 IPv6 出口" '\033[92m'
-    uiOption 3 "设置 IPv6 全局" "全部流量强制走原生 IPv6 出站"
-    uiOption 4 "卸载 IPv6 分流" "移除 IPv6 路由与全局出站规则" '\033[31m'
-    uiBackOption "返回智能分流菜单"
-    uiConsumeNotice
-
-    local ipv6Status
-    read -r -p "  请选择 [0-4]: " ipv6Status
-    if [[ "${ipv6Status}" == "0" || -z "${ipv6Status}" ]]; then
-        routingToolsMenu 1
-        return 0
-    elif [[ "${ipv6Status}" == "1" ]]; then
+    checkIPv6
+    echoContent skyBlue "\n功能 1/${totalProgress} : IPv6分流"
+    echoContent red "\n=============================================================="
+    echoContent yellow "1.查看已分流域名"
+    echoContent yellow "2.添加域名"
+    echoContent yellow "3.设置IPv6全局"
+    echoContent yellow "4.卸载IPv6分流"
+    echoContent red "=============================================================="
+    read -r -p "请选择:" ipv6Status
+    if [[ "${ipv6Status}" == "1" ]]; then
         showIPv6Routing
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 IPv6 分流菜单..."
-        ipv6Routing 1
-        return 0
+        exit 0
     elif [[ "${ipv6Status}" == "2" ]]; then
-        printf '\n'
-        uiDivider gray
-        echoContent yellow "  注意事项:"
-        echoContent gray   "    • 教程: https://www.v2ray-agent.com/archives/1683226921000"
-        uiDivider gray
-        read -r -p "  请按照教程示例录入域名 [留空取消]: " domainList
-        if [[ -z "${domainList}" ]]; then
-            ipv6Routing 1
-            return 0
-        fi
+        echoContent red "=============================================================="
+        echoContent yellow "# 注意事项\n"
+        echoContent yellow "# 注意事项"
+        echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000 \n"
+
+        read -r -p "请按照上面示例录入域名:" domainList
         if [[ "${coreInstallType}" == "1" ]]; then
             addXrayRouting IPv6_out outboundTag "${domainList}"
             addXrayOutbound IPv6_out
@@ -9168,13 +8876,12 @@ ipv6Routing() {
         echoContent green " ---> 添加完毕"
 
     elif [[ "${ipv6Status}" == "3" ]]; then
-        printf '\n'
-        uiDivider gray
-        echoContent yellow "  注意事项:"
-        echoContent gray   "    • 会删除所有已设置的分流规则"
-        echoContent gray   "    • 会删除 IPv6 之外的所有出站规则"
-        uiDivider gray
-        read -r -p "  是否确认设置？[y/n]: " IPv6OutStatus
+
+        echoContent red "=============================================================="
+        echoContent yellow "# 注意事项\n"
+        echoContent yellow "1.会删除所有设置的分流规则"
+        echoContent yellow "2.会删除IPv6之外的所有出站规则\n"
+        read -r -p "是否确认设置？[y/n]:" IPv6OutStatus
 
         if [[ "${IPv6OutStatus}" == "y" ]]; then
             if [[ "${coreInstallType}" == "1" ]]; then
@@ -9209,11 +8916,9 @@ ipv6Routing() {
 
             echoContent green " ---> IPv6全局出站设置完毕"
         else
+
             echoContent green " ---> 放弃设置"
-            uiDivider gray
-            uiPauseReturn "  按回车键返回 IPv6 分流菜单..."
-            ipv6Routing 1
-            return 0
+            exit 0
         fi
 
     elif [[ "${ipv6Status}" == "4" ]]; then
@@ -9232,15 +8937,11 @@ ipv6Routing() {
 
         echoContent green " ---> IPv6分流卸载成功"
     else
-        uiNoticeMsg="输入无效，请输入 0-4"
-        ipv6Routing 1
-        return 0
+        echoContent red " ---> 选择错误"
+        exit 0
     fi
 
     reloadCore
-    uiDivider gray
-    uiPauseReturn "  按回车键返回 IPv6 分流菜单..."
-    ipv6Routing 1
 }
 
 # ipv6分流规则展示
@@ -9248,7 +8949,7 @@ showIPv6Routing() {
     if [[ "${coreInstallType}" == "1" ]]; then
         if [[ -f "${configPath}09_routing.json" ]]; then
             echoContent yellow "Xray-core："
-            jq -r -c '.routing.rules[]|select (.outboundTag=="IPv6_out")|.domain' ${configPath}09_routing.json | jq -r
+            jq -r -c '.routing.rules[]|select (.outboundTag=="IPv6_out")|.domain' ${configPath}09_routing.json | jq -
         elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}IPv6_out.json" ]]; then
             echoContent yellow "Xray-core"
             echoContent green " ---> 已设置IPv6全局分流"
@@ -9260,7 +8961,7 @@ showIPv6Routing() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}IPv6_route.json" ]]; then
             echoContent yellow "sing-box"
-            jq -r -c '.route.rules[]|select (.outbound=="IPv6_out")' "${singBoxConfigPath}IPv6_route.json" | jq -r
+            jq -r -c '.route.rules[]|select (.outbound=="IPv6_out")' "${singBoxConfigPath}IPv6_route.json" | jq -
         elif [[ ! -f "${singBoxConfigPath}IPv6_route.json" && -f "${singBoxConfigPath}IPv6_out.json" ]]; then
             echoContent yellow "sing-box"
             echoContent green " ---> 已设置IPv6全局分流"
@@ -9272,41 +8973,29 @@ showIPv6Routing() {
 # bt下载管理
 btTools() {
     if [[ "${coreInstallType}" == "2" ]]; then
-        uiClear
-        uiHeader "BT 下载流量控制"
-        echoContent yellow "\n  ! 此功能当前仅支持 Xray-core 内核"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
-        return 0
+        echoContent red "\n ---> 此功能仅支持Xray-core内核，请等待后续更新"
+        exit 0
     fi
     if [[ -z "${configPath}" ]]; then
-        uiClear
-        uiHeader "BT 下载流量控制"
-        echoContent red "\n  ! 未检测到已安装的节点配置，请先部署节点"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
-        return 0
+        echoContent red " ---> 未安装，请使用脚本安装"
+        menu
+        exit 0
     fi
 
-    uiClear
-    uiHeader "BT 下载流量控制" "开启流量嗅探并通过 Xray 路由阻断 BitTorrent"
+    echoContent skyBlue "\n功能 1/${totalProgress} : bt下载管理"
+    echoContent red "\n=============================================================="
+
     if [[ -f ${configPath}09_routing.json ]] && grep -q bittorrent <${configPath}09_routing.json; then
-        echoContent green "  当前状态 : 已禁止 BT 下载"
+        echoContent yellow "当前状态:已禁止下载BT"
     else
-        echoContent yellow "  当前状态 : 允许 BT 下载"
+        echoContent yellow "当前状态:允许下载BT"
     fi
-    uiDivider gray
-    uiOption 1 "禁止下载 BT" "写入 bittorrent 黑洞路由规则并开启流量嗅探" '\033[92m'
-    uiOption 2 "允许下载 BT" "移除 bittorrent 黑洞路由规则"
-    uiBackOption "返回站点与证书管理"
-    uiConsumeNotice
 
-    local btStatus
-    read -r -p "  请选择 [0-2]: " btStatus
-    if [[ "${btStatus}" == "0" || -z "${btStatus}" ]]; then
-        siteCertMenu
-        return 0
-    elif [[ "${btStatus}" == "1" ]]; then
+    echoContent yellow "1.禁止下载BT"
+    echoContent yellow "2.允许下载BT"
+    echoContent red "=============================================================="
+    read -r -p "请选择:" btStatus
+    if [[ "${btStatus}" == "1" ]]; then
 
         if [[ -f "${configPath}09_routing.json" ]]; then
 
@@ -9347,65 +9036,44 @@ EOF
 
         echoContent green " ---> 允许BT下载"
     else
-        uiNoticeMsg="输入无效，请输入 0-2"
-        btTools
-        return 0
+        echoContent red " ---> 选择错误"
+        exit 0
     fi
 
     reloadCore
-    uiDivider gray
-    uiPauseReturn "  按回车键返回 BT 控制菜单..." btTools
 }
 
 # 域名黑名单
 blacklist() {
     if [[ -z "${configPath}" ]]; then
-        uiClear
-        uiHeader "域名与 IP 黑白名单"
-        echoContent red "\n  ! 未检测到已安装的节点配置，请先部署节点"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
-        return 0
+        echoContent red " ---> 未安装，请使用脚本安装"
+        menu
+        exit 0
     fi
 
-    uiClear
-    uiHeader "域名与 IP 黑白名单" "管理出站屏蔽域名、IP 及直连白名单规则"
-    uiOption 1 "查看已屏蔽域名" "输出当前 blackhole 规则中的域名列表"
-    uiOption 2 "添加屏蔽域名" "拦截指定域名或 geosite 规则组出站" '\033[92m'
-    uiOption 3 "屏蔽大陆域名+IP" "禁止国内域名与 IP 经本机代理出站（保留常见服务）"
-    uiOption 4 "卸载黑/白名单" "清理所有黑白名单与大陆屏蔽规则" '\033[31m'
-    uiOption 5 "添加屏蔽 IP" "拦截指定 IPv4 / IPv6 / CIDR 网段出站"
-    uiOption 6 "添加域名白名单" "强制指定域名走直连出站"
-    uiBackOption "返回站点与证书管理"
-    uiConsumeNotice
+    echoContent skyBlue "\n进度  $1/${totalProgress} : 域名黑名单"
+    echoContent red "\n=============================================================="
+    echoContent yellow "1.查看已屏蔽域名"
+    echoContent yellow "2.添加域名"
+    echoContent yellow "3.屏蔽大陆域名+IP"
+    echoContent yellow "4.卸载黑/白名单"
+    echoContent yellow "5.添加IP"
+    echoContent yellow "6.添加域名白名单"
+    echoContent red "=============================================================="
 
-    local blacklistStatus
-    read -r -p "  请选择 [0-6]: " blacklistStatus
-    if [[ "${blacklistStatus}" == "0" || -z "${blacklistStatus}" ]]; then
-        siteCertMenu
-        return 0
-    elif [[ "${blacklistStatus}" == "1" ]]; then
-        if [[ -f "${configPath}09_routing.json" ]]; then
-            jq -r -c '.routing.rules[]|select (.outboundTag=="blackhole_out")|.domain' "${configPath}09_routing.json" | jq -r
-        else
-            echoContent yellow "\n  ---> 暂未配置 Xray 域名黑名单规则"
-        fi
-        uiDivider gray
-        uiPauseReturn "  按回车键返回黑白名单菜单..." blacklist
-        return 0
+    read -r -p "请选择:" blacklistStatus
+    if [[ "${blacklistStatus}" == "1" ]]; then
+        jq -r -c '.routing.rules[]|select (.outboundTag=="blackhole_out")|.domain' ${configPath}09_routing.json | jq -
+        exit 0
     elif [[ "${blacklistStatus}" == "2" ]]; then
-        printf '\n'
-        uiDivider gray
-        echoContent yellow "  注意事项:"
-        echoContent gray   "    • 支持预定义域名列表 (github.com/v2fly/domain-list-community) 与自定义域名"
-        echoContent gray   "    • 录入示例: speedtest,facebook,cn,example.com"
-        echoContent gray   "    • 若命中预定义列表则使用 geosite:xx，否则按域名匹配；规则为增量追加"
-        uiDivider gray
-        read -r -p "  请按照示例录入域名 [留空取消]: " domainList
-        if [[ -z "${domainList}" ]]; then
-            blacklist
-            return 0
-        fi
+        echoContent red "=============================================================="
+        echoContent yellow "# 注意事项\n"
+        echoContent yellow "1.规则支持预定义域名列表[https://github.com/v2fly/domain-list-community]"
+        echoContent yellow "2.规则支持自定义域名"
+        echoContent yellow "3.录入示例:speedtest,facebook,cn,example.com"
+        echoContent yellow "4.如果域名在预定义域名列表中存在则使用 geosite:xx，如果不存在则默认使用输入的域名"
+        echoContent yellow "5.添加规则为增量配置，不会删除之前设置的内容\n"
+        read -r -p "请按照上面示例录入域名:" domainList
         if [[ "${coreInstallType}" == "1" ]]; then
             addXrayRouting blackhole_out outboundTag "${domainList}"
             addXrayOutbound blackhole_out
@@ -9472,14 +9140,12 @@ blacklist() {
         fi
         echoContent green " ---> 域名黑名单/白名单删除完毕"
     elif [[ "${blacklistStatus}" == "5" ]]; then
-        printf '\n'
-        uiDivider gray
-        echoContent gray "  录入示例: 1.1.1.1,8.8.8.8,1.1.1.0/24,2400:3200::/32"
-        uiDivider gray
-        read -r -p "  请按照示例录入 IP [留空取消]: " ipList
+        echoContent red "=============================================================="
+        echoContent yellow "录入示例:1.1.1.1,8.8.8.8,1.1.1.0/24,2400:3200::/32\n"
+        read -r -p "请按照上面示例录入IP:" ipList
         if [[ -z "${ipList}" ]]; then
-            blacklist
-            return 0
+            echoContent red " ---> IP不可为空"
+            exit 0
         fi
 
         if [[ "${coreInstallType}" == "1" ]]; then
@@ -9493,14 +9159,12 @@ blacklist() {
         fi
         echoContent green " ---> 添加IP完毕"
     elif [[ "${blacklistStatus}" == "6" ]]; then
-        printf '\n'
-        uiDivider gray
-        echoContent gray "  录入示例: speedtest,openai,google.com"
-        uiDivider gray
-        read -r -p "  请按照示例录入域名 [留空取消]: " allowDomainList
+        echoContent red "=============================================================="
+        echoContent yellow "录入示例:speedtest,openai,google.com\n"
+        read -r -p "请按照上面示例录入域名:" allowDomainList
         if [[ -z "${allowDomainList}" ]]; then
-            blacklist
-            return 0
+            echoContent red " ---> 域名不可为空"
+            exit 0
         fi
 
         if [[ "${coreInstallType}" == "1" ]]; then
@@ -9514,13 +9178,10 @@ blacklist() {
         fi
         echoContent green " ---> 添加域名白名单完毕"
     else
-        uiNoticeMsg="输入无效，请输入 0-6"
-        blacklist
-        return 0
+        echoContent red " ---> 选择错误"
+        exit 0
     fi
     reloadCore
-    uiDivider gray
-    uiPauseReturn "  按回车键返回黑白名单菜单..." blacklist
 }
 # 下载 dlc.dat_plain.yml 到核心目录
 downloadDLCPlainYAML() {
@@ -9763,7 +9424,7 @@ EOF
 }
 
 # 添加 sing-box IP 屏蔽路由规则
-# 支持增量合并历史 ip_cidr
+# 支持增量合并历史 ip_cid
 addSingBoxIPRouteRule() {
     local outboundTag=$1
     local ipList=$2
@@ -9926,7 +9587,7 @@ showWireGuardDomain() {
     if [[ "${coreInstallType}" == "1" ]]; then
         if [[ -f "${configPath}09_routing.json" ]]; then
             echoContent yellow "Xray-core"
-            jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -r
+            jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -
         elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}wireguard_out_${type}.json" ]]; then
             echoContent yellow "Xray-core"
             echoContent green " ---> 已设置warp ${type}全局分流"
@@ -9939,7 +9600,7 @@ showWireGuardDomain() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" ]]; then
             echoContent yellow "sing-box"
-            jq -r -c '.route.rules[]' "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" | jq -r
+            jq -r -c '.route.rules[]' "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" | jq -
         elif [[ ! -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" && -f "${singBoxConfigPath}wireguard_endpoints_${type}.json" ]]; then
             echoContent yellow "sing-box"
             echoContent green " ---> 已设置warp ${type}全局分流"
@@ -10021,30 +9682,16 @@ removeWireGuardRoute() {
 }
 # warp分流-第三方IPv4
 warpRoutingReg() {
-    local step=$1 type=$2 warpStatus
-    uiClear
-    uiHeader "WARP 分流 (${type} 出站)" "借用 Cloudflare WARP WireGuard 通道解锁受限服务"
-    uiOption 1 "查看已分流域名" "展示当前走 WARP ${type} 出口的域名规则"
-    uiOption 2 "添加分流域名" "指定域名走 WARP ${type} 出站" '\033[92m'
-    uiOption 3 "设置 WARP 全局" "全站流量切换至 WARP ${type} 出站"
-    uiOption 4 "卸载 WARP 分流" "移除 WARP ${type} 规则并恢复默认直连" '\033[31m'
-    uiBackOption "返回智能分流菜单"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-4]: " warpStatus
-    case "${warpStatus}" in
-    0 | "")
-        routingToolsMenu 1
-        return 0
-        ;;
-    1 | 2 | 3 | 4)
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-4"
-        warpRoutingReg "${step}" "${type}"
-        return 0
-        ;;
-    esac
+    local type=$2
+    echoContent skyBlue "\n进度  $1/${totalProgress} : WARP分流[第三方]"
+    echoContent red "=============================================================="
 
+    echoContent yellow "1.查看已分流域名"
+    echoContent yellow "2.添加域名"
+    echoContent yellow "3.设置WARP全局"
+    echoContent yellow "4.卸载WARP分流"
+    echoContent red "=============================================================="
+    read -r -p "请选择:" warpStatus
     installWarpReg
     readConfigWarpReg
     local address=
@@ -10053,39 +9700,28 @@ warpRoutingReg() {
     elif [[ ${type} == "IPv6" ]]; then
         address="${addressWarpReg}/128"
     else
-        echoContent red " ---> IP获取失败，退出操作"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回智能分流菜单..." routingToolsMenu
-        return 1
+        echoContent red " ---> IP获取失败，退出安装"
     fi
 
     if [[ "${warpStatus}" == "1" ]]; then
         showWireGuardDomain "${type}"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 WARP 分流菜单..."
-        warpRoutingReg "${step}" "${type}"
-        return 0
+        exit 0
     elif [[ "${warpStatus}" == "2" ]]; then
-        echoContent yellow "\n  注意事项:"
-        echoContent gray   "    • 支持 sing-box、Xray-core"
-        echoContent gray   "    • 教程: https://www.v2ray-agent.com/archives/1683226921000"
-        printf '\n'
-        read -r -p "  请按照教程示例录入域名 [留空取消]: " domainList
-        if [[ -z "${domainList}" ]]; then
-            warpRoutingReg "${step}" "${type}"
-            return 0
-        fi
+        echoContent yellow "# 注意事项"
+        echoContent yellow "# 支持sing-box、Xray-core"
+        echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000 \n"
+
+        read -r -p "请按照上面示例录入域名:" domainList
         addWireGuardRoute "${type}" outboundTag "${domainList}"
         echoContent green " ---> 添加完毕"
 
     elif [[ "${warpStatus}" == "3" ]]; then
-        printf '\n'
-        uiDivider gray
-        echoContent yellow "  注意事项:"
-        echoContent gray   "    • 会删除所有已设置的分流规则"
-        echoContent gray   "    • 会删除除 WARP[第三方] 之外的所有出站规则"
-        uiDivider gray
-        read -r -p "  是否确认设置？[y/n]: " warpOutStatus
+
+        echoContent red "=============================================================="
+        echoContent yellow "# 注意事项\n"
+        echoContent yellow "1.会删除所有设置的分流规则"
+        echoContent yellow "2.会删除除WARP[第三方]之外的所有出站规则\n"
+        read -r -p "是否确认设置？[y/n]:" warpOutStatus
 
         if [[ "${warpOutStatus}" == "y" ]]; then
             readConfigWarpReg
@@ -10135,10 +9771,7 @@ warpRoutingReg() {
             echoContent green " ---> WARP全局出站设置完毕"
         else
             echoContent green " ---> 放弃设置"
-            uiDivider gray
-            uiPauseReturn "  按回车键返回 WARP 分流菜单..."
-            warpRoutingReg "${step}" "${type}"
-            return 0
+            exit 0
         fi
 
     elif [[ "${warpStatus}" == "4" ]]; then
@@ -10157,28 +9790,31 @@ warpRoutingReg() {
         fi
 
         echoContent green " ---> 卸载WARP ${type}分流完毕"
+    else
+
+        echoContent red " ---> 选择错误"
+        exit 0
     fi
     reloadCore
-    uiDivider gray
-    uiPauseReturn "  按回车键返回 WARP 分流菜单..."
-    warpRoutingReg "${step}" "${type}"
 }
 
 # 分流工具
 routingToolsMenu() {
     readInstallType
     readInstallProtocolType
-    uiClear
-    uiHeader "智能分流与落地出站" "解锁 AI / 流媒体服务，或将出站流量转发至落地机"
-    uiOption 1 "WARP 分流 (IPv4 出站)" "借用 Cloudflare WARP IPv4 解锁受限网站"
-    uiOption 2 "WARP 分流 (IPv6 出站)" "为指定域名走 WARP IPv6 出站"
-    uiOption 3 "IPv6 原生路由分流" "指定域名优先走本机原生 IPv6 出口"
-    uiOption 4 "Socks5 分流与入站" "对接外部落地机，或开启独立 Socks5 入站"
-    uiOption 5 "DNS 解锁分流" "将特定域名交由解锁 DNS 解析"
-    uiOption 6 "SNI 反向代理分流" "仅支持 Xray-core（不支持 Hysteria2 / TUIC）"
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-6]: " selectType
+    echoContent skyBlue "\n========================= 智能分流工具 ========================="
+    echoContent yellow "说明：用于服务端出站流量分流，可解锁 ChatGPT / 流媒体或挂载落地机"
+    echoContent red "================================================================"
+    echoContent yellow "  1. WARP 分流 (第三方 IPv4 出站)"
+    echoContent yellow "  2. WARP 分流 (第三方 IPv6 出站)"
+    echoContent yellow "  3. IPv6 路由分流"
+    echoContent yellow "  4. Socks5 分流 (挂载落地机 / 独立入站)"
+    echoContent yellow "  5. DNS 解锁分流"
+    echoContent yellow "  6. SNI 反向代理分流"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    read -r -p "请选择 [0-6]: " selectType
 
     case ${selectType} in
     0 | "")
@@ -10201,13 +9837,9 @@ routingToolsMenu() {
         ;;
     6 | 7)
         if [[ -n "${singBoxConfigPath}" ]]; then
-            echoContent red "\n  ! 此功能不支持 Hysteria2 / TUIC"
+            echoContent red "\n ---> 此功能不支持Hysteria2、Tuic"
         fi
         sniRouting 1
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-6 之间的数字"
-        routingToolsMenu
         ;;
     esac
 }
@@ -10637,7 +10269,7 @@ commitSocks5Inbound() (
 
 # Export only connection fields; wildcard listen addresses are not remote endpoints.
 socks5InboundShareConfig() {
-    local inbound=${1:-/etc/v2ray-agent/sing-box/conf/config/20_socks5_inbounds.json} server
+    local inbound=${1:-/etc/v2ray-agent/sing-box/conf/config/20_socks5_inbounds.json} serve
     server=$(jq -er '.inbounds[0].listen' "$inbound") || return 1
     case "$server" in '::' | '0.0.0.0' | '') server=$(getPublicIP) ;; esac
     if [[ -z "$server" ]]; then
@@ -10727,72 +10359,49 @@ updateSocks5InboundRules() {
 }
 
 socks5Routing() {
-    uiClear
-    uiHeader "Socks5 分流与入站" "对接外部落地机，或在本机开启独立 Socks5 入站"
-    echoContent yellow "  注意事项:"
-    echoContent gray   "    • 流量为明文传输，仅限正常网络环境下设备间流量转发"
-    echoContent gray   "    • 教程: https://www.v2ray-agent.com/archives/1683226921000#heading-5"
-    uiDivider gray
-    uiOption 1 "连接落地机 (SOCKS5 出站)" "配置外部落地节点与分流规则" '\033[92m'
-    uiOption 2 "搭建落地机 (SOCKS5 入站)" "部署独立 sing-box Socks5 服务端"
-    uiOption 3 "卸载 Socks5 相关配置" "移除 Socks5 出站 / 入站与规则" '\033[31m'
-    uiBackOption "返回智能分流菜单"
-    uiConsumeNotice
-    local selectType
-    read -r -p "  请选择 [0-3]: " selectType
+    echoContent skyBlue "\n功能 1/${totalProgress} : Socks5分流"
+    echoContent red "\n=============================================================="
+    echoContent red "# 注意事项"
+    echoContent yellow "# 流量明文访问"
+
+    echoContent yellow "# 仅限正常网络环境下设备间流量转发，禁止用于代理访问。"
+    echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000#heading-5 \n"
+
+    echoContent yellow "1.连接落地机（SOCKS5 出站）"
+    echoContent yellow "2.搭建落地机（SOCKS5 入站）"
+    echoContent yellow "3.卸载"
+    read -r -p "请选择:" selectType
 
     case ${selectType} in
-    0 | "")
-        routingToolsMenu 1
-        return 0
-        ;;
     1)
         if [[ -z "${coreInstallType}" ]]; then
-            uiNoticeMsg="未安装核心协议，请先从主菜单部署节点后再使用出站分流"
-            socks5Routing
-            return 0
+            echoContent red " ---> 未安装任意协议，请使用 1.安装 或者 2.任意组合安装 进行安装后使用"
+            return 1
         fi
         socks5OutboundRoutingMenu
-        socks5Routing
         ;;
     2)
         socks5InboundRoutingMenu
         ;;
     3)
         removeSocks5Routing
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 Socks5 菜单..."
-        socks5Routing
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-3"
-        socks5Routing
         ;;
     esac
 }
 # Socks5入站菜单
 socks5InboundRoutingMenu() {
     readInstallType
-    uiClear
-    uiHeader "Socks5 独立入站管理" "基于 sing-box 部署与维护本机 Socks5 入站服务"
-    uiOption 1 "安装 Socks5 入站" "部署并启用独立 Socks5 入站端口" '\033[92m'
-    uiOption 2 "查看分流规则" "查看 00_socks5_guard.json 当前路由配置"
-    uiOption 3 "添加分流规则" "追加或修改 Socks5 入站出站策略"
-    uiOption 4 "查看入站配置" "查看端口、用户名、密码及对接参数"
-    uiBackOption "返回 Socks5 菜单"
-    uiConsumeNotice
-    local selectType
-    read -r -p "  请选择 [0-4]: " selectType
+    echoContent skyBlue "\n功能 1/1 : Socks5入站"
+    echoContent red "\n=============================================================="
+
+    echoContent yellow "1.安装Socks5入站"
+    echoContent yellow "2.查看分流规则"
+    echoContent yellow "3.添加分流规则"
+    echoContent yellow "4.查看入站配置"
+    read -r -p "请选择:" selectType
     case ${selectType} in
-    0 | "")
-        socks5Routing
-        return 0
-        ;;
     1)
         installSocks5InboundStandalone
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 Socks5 入站菜单..."
-        socks5InboundRoutingMenu
         ;;
     2)
         if [[ -f /etc/v2ray-agent/sing-box/conf/config/00_socks5_guard.json ]]; then
@@ -10800,15 +10409,9 @@ socks5InboundRoutingMenu() {
         else
             echoContent red " ---> 未安装相应功能"
         fi
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 Socks5 入站菜单..."
-        socks5InboundRoutingMenu
         ;;
     3)
         updateSocks5InboundRules
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 Socks5 入站菜单..."
-        socks5InboundRoutingMenu
         ;;
     4)
         if [[ -f "/etc/v2ray-agent/sing-box/conf/config/20_socks5_inbounds.json" ]]; then
@@ -10820,13 +10423,6 @@ socks5InboundRoutingMenu() {
         else
             echoContent red " ---> 未安装相应功能"
         fi
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 Socks5 入站菜单..."
-        socks5InboundRoutingMenu
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-4"
-        socks5InboundRoutingMenu
         ;;
     esac
 
@@ -11337,7 +10933,7 @@ socks5OutboundLoad() {
 }
 
 socks5OutboundModern() {
-    local version major minor
+    local version major mino
     version=$("$s5SBin" version 2>/dev/null | sed -nE 's/^sing-box version ([0-9]+)\.([0-9]+).*/\1 \2/p')
     [[ "$version" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
     read -r major minor <<<"$version"
@@ -12180,54 +11776,36 @@ socks5OutboundTestNode() (
 socks5OutboundRoutingMenu() {
     local choice status
     while true; do
-        uiClear
-        uiHeader "$(socks5OutboundText 'SOCKS5 出站管理' 'SOCKS5 Outbound')" "$(socks5OutboundText '对接外部落地机与出站分流规则' 'Manage upstream nodes and outbound routes')"
+        echo
+        echoContent skyBlue "$(socks5OutboundText ' ---> SOCKS5 出站' 'SOCKS5 outbound')"
+        echo
         if socks5OutboundInstalled; then
-            uiOption 1 "$(socks5OutboundText '添加落地机' 'Add node')" "$(socks5OutboundText '录入外部 SOCKS5 服务器信息' 'Configure upstream SOCKS5 server')" '\033[92m'
-            uiOption 2 "$(socks5OutboundText '查看配置  ' 'View config')" "$(socks5OutboundText '展示当前已配置的落地机与规则' 'Inspect configured nodes and routes')"
-            uiOption 3 "$(socks5OutboundText '添加规则  ' 'Add route')" "$(socks5OutboundText '绑定指定域名 / 入站走落地出站' 'Route specific traffic through outbound')"
-            uiDivider gray
-            uiOption 4 "$(socks5OutboundText '节点管理  ' 'Manage nodes')" "$(socks5OutboundText '编辑、删除或测试落地机连通性' 'Edit, delete or test nodes')"
-            uiOption 5 "$(socks5OutboundText '规则管理  ' 'Manage routes')" "$(socks5OutboundText '编辑或删除已有分流规则' 'Edit or delete routes')"
-            uiOption 6 "$(socks5OutboundText '更多操作  ' 'More actions')" "$(socks5OutboundText '设置默认出站或卸载全部出站' 'Set default outbound or uninstall all')"
+            echoContent yellow "$(socks5OutboundText '1.添加落地机  2.查看配置  3.添加规则' '1.Add node  2.View configuration  3.Add route')"
+            echoContent yellow "$(socks5OutboundText '4.节点管理    5.规则管理  6.更多操作' '4.Manage nodes  5.Manage routes  6.More actions')"
         else
             status=$?
             [[ "$status" == 1 ]] || return 1
-            uiOption 1 "$(socks5OutboundText '添加落地机' 'Add node')" "$(socks5OutboundText '录入外部 SOCKS5 服务器信息' 'Configure upstream SOCKS5 server')" '\033[92m'
+            echoContent yellow "$(socks5OutboundText '1.添加落地机' '1.Add node')"
         fi
-        uiBackOption "$(socks5OutboundText '返回 Socks5 菜单' 'Back')"
-        uiConsumeNotice
-        socks5OutboundRead choice '  请选择:' '  Select:' || return 0
+        echoContent yellow "$(socks5OutboundText '0.返回' '0.Back')"
+        socks5OutboundRead choice '请选择:' 'Select:' || return 0
         case "$choice" in
-        2 | 3 | 4 | 5 | 6) socks5OutboundRequireInstalled || {
-            uiNoticeMsg="$(socks5OutboundText '请先添加落地机后再操作' 'Please add an outbound node first')"
-            continue
-        } ;;
+        2 | 3 | 4 | 5 | 6) socks5OutboundRequireInstalled || continue ;;
         esac
         case "$choice" in
-        1)
-            socks5OutboundInputNode ''
-            [[ $? == 0 ]] || socks5OutboundText '操作未完成，现有配置已保留' 'Operation did not complete; existing configuration preserved' >&2
-            uiPauseReturn "  $(socks5OutboundText '按回车键继续...' 'Press Enter to continue...')"
-            ;;
-        2)
-            socks5OutboundView
-            uiPauseReturn "  $(socks5OutboundText '按回车键继续...' 'Press Enter to continue...')"
-            ;;
-        3)
-            socks5OutboundInputRoute ''
-            [[ $? == 0 ]] || socks5OutboundText '操作未完成，现有配置已保留' 'Operation did not complete; existing configuration preserved' >&2
-            uiPauseReturn "  $(socks5OutboundText '按回车键继续...' 'Press Enter to continue...')"
-            ;;
+        1) socks5OutboundInputNode '' ;;
+        2) socks5OutboundView ;;
+        3) socks5OutboundInputRoute '' ;;
         4) socks5OutboundManage nodes ;;
         5) socks5OutboundManage routes ;;
         6) socks5OutboundMoreMenu ;;
         0 | '') return 0 ;;
         *)
-            uiNoticeMsg="$(socks5OutboundText '编号无效，请重新输入' 'Invalid number; try again')"
+            echoContent yellow "$(socks5OutboundText '编号无效，请重新输入' 'Invalid number; try again')"
             continue
             ;;
         esac
+        [[ $? == 0 ]] || socks5OutboundText '操作未完成，现有配置已保留' 'Operation did not complete; existing configuration preserved' >&2
     done
 }
 
@@ -12304,18 +11882,13 @@ showXrayRoutingRules() {
 
 # 卸载Socks5分流
 removeSocks5Routing() {
-    uiClear
-    uiHeader "卸载 Socks5 分流与入站" "按需单独移除出站、入站或全部清理"
-    uiOption 1 "卸载 Socks5 出站" "清理所有外部落地机出站与分流规则"
-    uiOption 2 "卸载 Socks5 入站" "移除独立 Socks5 入站服务与配置"
-    uiOption 3 "卸载全部 Socks5 " "清理所有 Socks5 出站及入站配置" '\033[31m'
-    uiBackOption "返回 Socks5 菜单"
-    uiConsumeNotice
-    local unInstallSocks5RoutingStatus
-    read -r -p "  请选择 [0-3]: " unInstallSocks5RoutingStatus
-    if [[ "${unInstallSocks5RoutingStatus}" == "0" || -z "${unInstallSocks5RoutingStatus}" ]]; then
-        return 0
-    fi
+    echoContent skyBlue "\n功能 1/1 : 卸载Socks5分流"
+    echoContent red "\n=============================================================="
+
+    echoContent yellow "1.卸载Socks5出站"
+    echoContent yellow "2.卸载Socks5入站"
+    echoContent yellow "3.卸载全部"
+    read -r -p "请选择:" unInstallSocks5RoutingStatus
     if [[ "${unInstallSocks5RoutingStatus}" == "2" ]]; then
         if [[ ! -f /etc/v2ray-agent/sing-box/conf/config/00_socks5_guard.json ]]; then
             echoContent red " ---> 未安装本版本 SOCKS5 入站"
@@ -12360,9 +11933,8 @@ removeSocks5Routing() {
 
         handleSingBox stop
     else
-        uiNoticeMsg="输入无效，请输入 0-3"
-        removeSocks5Routing
-        return $?
+        echoContent red " ---> 选择错误"
+        exit 0
     fi
     echoContent green " ---> 卸载完毕"
     reloadCore
@@ -12524,90 +12096,55 @@ reloadCore() {
 
 # dns分流
 dnsRouting() {
+
     if [[ -z "${configPath}" ]]; then
-        uiClear
-        uiHeader "DNS 解锁分流"
-        echoContent red "\n  ! 未检测到已安装的节点配置，请先部署节点"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回智能分流菜单..." routingToolsMenu
-        return 0
+        echoContent red " ---> 未安装，请使用脚本安装"
+        menu
+        exit 0
     fi
-    uiClear
-    uiHeader "DNS 解锁分流" "将特定域名交由指定解锁 DNS 服务器解析"
-    echoContent gray "  使用教程: https://www.v2ray-agent.com/archives/1683226921000"
-    uiDivider gray
-    uiOption 1 "添加 DNS 解锁分流" "配置解锁 DNS IP 与指定域名" '\033[92m'
-    uiOption 2 "卸载 DNS 解锁分流" "清除自定义解锁 DNS 规则并恢复" '\033[31m'
-    uiBackOption "返回智能分流菜单"
-    uiConsumeNotice
-    local selectType
-    read -r -p "  请选择 [0-2]: " selectType
+    echoContent skyBlue "\n功能 1/${totalProgress} : DNS分流"
+    echoContent red "\n=============================================================="
+    echoContent yellow "# 注意事项"
+    echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000 \n"
+
+    echoContent yellow "1.添加"
+    echoContent yellow "2.卸载"
+    read -r -p "请选择:" selectType
 
     case ${selectType} in
-    0 | "")
-        routingToolsMenu 1
-        return 0
-        ;;
     1)
         setUnlockDNS
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 DNS 分流菜单..."
-        dnsRouting 1
         ;;
     2)
         removeUnlockDNS
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 DNS 分流菜单..."
-        dnsRouting 1
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-2"
-        dnsRouting 1
         ;;
     esac
 }
 
 # SNI反向代理分流
 sniRouting() {
+
     if [[ -z "${configPath}" ]]; then
-        uiClear
-        uiHeader "SNI 反向代理分流"
-        echoContent red "\n  ! 未检测到已安装的节点配置，请先部署节点"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回智能分流菜单..." routingToolsMenu
-        return 0
+        echoContent red " ---> 未安装，请使用脚本安装"
+        menu
+        exit 0
     fi
-    uiClear
-    uiHeader "SNI 反向代理分流" "仅支持指定域名静态映射（sing-box 不支持规则集）"
-    echoContent gray "  使用教程: https://www.v2ray-agent.com/archives/1683226921000"
-    uiDivider gray
-    uiOption 1 "添加 SNI 反向代理分流" "指定域名解析至目标 SNI IP" '\033[92m'
-    uiOption 2 "卸载 SNI 反向代理分流" "清除 SNI 反向代理规则并恢复" '\033[31m'
-    uiBackOption "返回智能分流菜单"
-    uiConsumeNotice
-    local selectType
-    read -r -p "  请选择 [0-2]: " selectType
+    echoContent skyBlue "\n功能 1/${totalProgress} : SNI反向代理分流"
+    echoContent red "\n=============================================================="
+    echoContent yellow "# 注意事项"
+    echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000 \n"
+    echoContent yellow "# sing-box不支持规则集，仅支持指定域名。\n"
+
+    echoContent yellow "1.添加"
+    echoContent yellow "2.卸载"
+    read -r -p "请选择:" selectType
 
     case ${selectType} in
-    0 | "")
-        routingToolsMenu 1
-        return 0
-        ;;
     1)
         setUnlockSNI
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 SNI 分流菜单..."
-        sniRouting 1
         ;;
     2)
         removeUnlockSNI
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 SNI 分流菜单..."
-        sniRouting 1
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-2"
-        sniRouting 1
         ;;
     esac
 }
@@ -12866,38 +12403,28 @@ EOF
 
 # sing-box 个性化安装
 customSingBoxInstall() {
-    uiClear
-    uiHeader "自定义组合安装 (sing-box)" "支持多选协议编号并用英文逗号分隔，例如 0,6,7"
-    uiOption 0  "VLESS+Vision+TCP" "TLS 兜底主流直连协议"
-    uiOption 1  "VLESS+TLS+WS" "仅推荐套用 CDN 场景"
-    uiOption 3  "VMess+TLS+WS" "仅推荐套用 CDN 场景"
-    uiOption 4  "Trojan+TLS" "旧协议（不推荐）"
-    uiOption 6  "Hysteria2" "QUIC 高速弱网抗丢包通道" '\033[92m'
-    uiOption 7  "VLESS+Reality+Vision" "免自有域名主力抗封锁协议" '\033[92m'
-    uiOption 8  "VLESS+Reality+gRPC" "Reality gRPC 传输通道"
-    uiOption 9  "Tuic" "基于 QUIC 的多路复用协议"
-    uiOption 10 "Naive" "伪装 HTTP/2 浏览器流量"
-    uiOption 11 "VMess+TLS+HTTPUpgrade" "支持 CDN 的 HTTPUpgrade 传输"
-    uiOption 13 "anytls" "AnyTLS 实验协议"
-    uiDivider gray
-    printf '  \033[1;36m直接回车\033[0m  返回核心选择（编号 0 为 VLESS+Vision+TCP）\n'
-    uiDivider gray
-    uiConsumeNotice
+    echoContent skyBlue "\n========================个性化安装============================"
+    echoContent yellow "0.VLESS+Vision+TCP"
+    echoContent yellow "1.VLESS+TLS+WS[仅CDN推荐]"
+    echoContent yellow "3.VMess+TLS+WS[仅CDN推荐]"
+    echoContent yellow "4.Trojan+TLS[不推荐]"
+    echoContent yellow "6.Hysteria2"
+    echoContent yellow "7.VLESS+Reality+Vision"
+    echoContent yellow "8.VLESS+Reality+gRPC"
+    echoContent yellow "9.Tuic"
+    echoContent yellow "10.Naive"
+    echoContent yellow "11.VMess+TLS+HTTPUpgrade"
+    echoContent yellow "13.anytls"
 
-    read -r -p "  请选择协议编号 [多选用英文逗号分隔，如 0,6,7]: " selectCustomInstallType
-    if [[ -z "${selectCustomInstallType}" ]]; then
-        selectCoreInstall
-        return 0
-    fi
+    read -r -p "请选择[多选]，[例如:1,2,3]:" selectCustomInstallType
+    echoContent skyBlue "--------------------------------------------------------------"
     if echo "${selectCustomInstallType}" | grep -q "，"; then
-        uiNoticeMsg="请使用英文逗号分隔编号，例如: 0,6,7"
-        customSingBoxInstall
-        return 0
+        echoContent red " ---> 请使用英文逗号分隔"
+        exit 0
     fi
     if [[ "${selectCustomInstallType}" != "10" ]] && [[ "${selectCustomInstallType}" != "11" ]] && [[ "${selectCustomInstallType}" != "13" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
-        uiNoticeMsg="多选请使用英文逗号分隔，例如: 0,6,7"
-        customSingBoxInstall
-        return 0
+        echoContent red " ---> 多选请使用英文逗号分隔"
+        exit 0
     fi
     if [[ "${selectCustomInstallType: -1}" != "," ]]; then
         selectCustomInstallType="${selectCustomInstallType},"
@@ -12909,7 +12436,7 @@ customSingBoxInstall() {
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]]; then
         runCustomSingBoxInstall
     else
-        uiNoticeMsg="输入不合法，请输入有效编号或英文逗号组合"
+        echoContent red " ---> 输入不合法"
         customSingBoxInstall
     fi
 }
@@ -12988,41 +12515,34 @@ installSingBoxReality() {
 }
 # Xray-core个性化安装
 customXrayInstall() {
-    uiClear
-    uiHeader "自定义组合安装 (Xray-core)" "默认包含 VLESS 前置；无域名安装 Reality 只选 7 即可"
-    uiOption 0  "VLESS+TLS_Vision+TCP" "主流抗封锁 TLS 直连 [推荐]" '\033[92m'
-    uiOption 1  "VLESS+TLS+WS" "仅推荐 CDN 场景"
-    uiOption 3  "VMess+TLS+WS" "仅推荐 CDN 场景"
-    uiOption 4  "Trojan+TLS" "旧协议（不推荐）"
-    uiOption 6  "Hysteria2" "QUIC 高速通道"
-    uiOption 7  "VLESS+Reality+uTLS+Vision" "主力免证书抗封锁协议 [推荐]" '\033[92m'
-    uiOption 12 "VLESS+REALITY+XHTTP" "Reality XHTTP 分片/上下行分离"
-    uiOption 14 "VLESS+XHTTP+TLS" "支持 CDN，随机端口，无需 Nginx"
-    uiDivider gray
-    printf '  \033[1;36m直接回车\033[0m  返回核心选择（编号 0 为 VLESS+TLS_Vision+TCP）\n'
-    uiDivider gray
-    uiConsumeNotice
-
-    read -r -p "  请选择协议编号 [多选用英文逗号分隔，如 0,6,7]: " selectCustomInstallType
-    if [[ -z "${selectCustomInstallType}" ]]; then
-        selectCoreInstall
-        return 0
-    fi
+    echoContent skyBlue "\n========================个性化安装============================"
+    echoContent yellow "VLESS前置，默认安装0，无域名安装Reality只选择7即可"
+    echoContent yellow "0.VLESS+TLS_Vision+TCP[推荐]"
+    echoContent yellow "1.VLESS+TLS+WS[仅CDN推荐]"
+    #    echoContent yellow "2.Trojan+TLS+gRPC[仅CDN推荐]"
+    echoContent yellow "3.VMess+TLS+WS[仅CDN推荐]"
+    echoContent yellow "4.Trojan+TLS[不推荐]"
+    echoContent yellow "6.Hysteria2"
+    #    echoContent yellow "5.VLESS+TLS+gRPC[仅CDN推荐]"
+    echoContent yellow "7.VLESS+Reality+uTLS+Vision[推荐]"
+    # echoContent yellow "8.VLESS+Reality+gRPC"
+    echoContent yellow "12.VLESS+REALITY+XHTTP"
+    echoContent yellow "14.VLESS+XHTTP+TLS[支持CDN，随机端口，无需Nginx]"
+    read -r -p "请选择[多选]，[例如:1,2,3]:" selectCustomInstallType
+    echoContent skyBlue "--------------------------------------------------------------"
     if echo "${selectCustomInstallType}" | grep -q "，"; then
-        uiNoticeMsg="请使用英文逗号分隔编号，例如: 0,6,7"
-        customXrayInstall
-        return 0
+        echoContent red " ---> 请使用英文逗号分隔"
+        exit 0
     fi
     if [[ "${selectCustomInstallType}" != "12" && "${selectCustomInstallType}" != "14" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
-        uiNoticeMsg="多选请使用英文逗号分隔，例如: 0,6,7"
-        customXrayInstall
-        return 0
+        echoContent red " ---> 多选请使用英文逗号分隔"
+        exit 0
     fi
     selectCustomInstallType=$(normalizeXrayInstallSelection "${selectCustomInstallType}")
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]]; then
         runCustomXrayInstall
     else
-        uiNoticeMsg="输入不合法，请输入有效编号或英文逗号组合"
+        echoContent red " ---> 输入不合法"
         customXrayInstall
     fi
 }
@@ -13096,20 +12616,20 @@ runCustomXrayInstall() {
 
 # 黄金抗封锁 3 件套一键部署 (,0,6,7,)
 installGoldenTrio() {
-    uiClear
-    uiHeader "黄金抗封锁 3 件套预设" "全自动零冲突端口分配"
+    echoContent skyBlue "\n===================== 黄金抗封锁 3 件套预设 ====================="
     echoContent green  "  协议组合 : VLESS+Reality[Vision] + Hysteria2 + VLESS+TCP[TLS_Vision]"
-    echoContent white  "    • VLESS+Reality(Vision)  -> TCP 443  (主力抗封锁 / 免自有证书防探测)"
-    echoContent white  "    • Hysteria2 (QUIC)       -> UDP 443  (高丢包弱网高速通道)"
+    echoContent yellow "  零冲突端口自动分配:"
+    echoContent white  "    • VLESS+Reality(Vision)  -> TCP 443  (主力抗封锁 / 免TLS防探测)"
+    echoContent white  "    • Hysteria2 (QUIC)       -> UDP 443  (弱网/高丢包高速通道)"
     echoContent white  "    • VLESS+TCP(TLS_Vision)  -> TCP 8443 (伪装站点回落兜底)"
-    echoContent gray   "  部署前请准备 1 个已解析到本机的域名（用于 Hysteria2 与 Vision TLS）"
-    uiDivider gray
-    uiOption 1 "Xray-core 单核部署" "单进程原生直跑三大协议 [推荐]" '\033[92m'
-    uiOption 2 "sing-box 核心部署" "由 sing-box 原生承载三大协议"
-    uiBackOption "返回部署菜单"
-    uiConsumeNotice
+    echoContent yellow "  提示：部署前请准备 1 个已解析到本机的域名（用于 Hy2 与 Vision TLS）"
+    echoContent red "================================================================"
+    echoContent yellow "  1. Xray-core 单核部署 (推荐，单进程原生直跑三大协议)"
+    echoContent yellow "  2. sing-box 核心部署"
+    echoContent skyBlue "  0. 返回部署菜单"
+    echoContent red "================================================================"
     local trioCoreChoice rc=0
-    read -r -p "  请选择部署核心 [0-2]: " trioCoreChoice
+    read -r -p "请选择部署核心 [0-2]: " trioCoreChoice
 
     case "${trioCoreChoice}" in
     1)
@@ -13132,7 +12652,7 @@ installGoldenTrio() {
         deployNodeMenu
         ;;
     *)
-        uiNoticeMsg="输入无效，请输入 0-2"
+        echoContent red " ---> 输入无效，请重新选择"
         installGoldenTrio
         ;;
     esac
@@ -13140,16 +12660,15 @@ installGoldenTrio() {
 
 # 选择核心安装sing-box、xray-core
 selectCoreInstall() {
-    uiClear
-    uiHeader "选择部署核心" "不同核心擅长的协议与生态各有侧重"
-    uiOption 1 "Xray-core" "擅长 Reality / XHTTP / Vision 高性能组合 [推荐]" '\033[92m'
-    uiOption 2 "sing-box" "擅长 Hysteria2 / TUIC / 多协议原生全能支持"
-    uiBackOption "返回部署菜单"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-2]: " selectCoreType
+    echoContent skyBlue "\n========================= 选择安装核心 ========================="
+    echoContent yellow "  1. Xray-core  (推荐 Reality / XHTTP / Vision 高性能组合)"
+    echoContent yellow "  2. sing-box   (推荐 Hysteria2 / TUIC / 多协议全能核心)"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    read -r -p "请选择 [0-2]: " selectCoreType
     case ${selectCoreType} in
     0 | "")
-        deployNodeMenu
+        menu
         ;;
     1)
         if [[ "${selectInstallType}" == "1" ]]; then
@@ -13170,7 +12689,7 @@ selectCoreInstall() {
         fi
         ;;
     *)
-        uiNoticeMsg="输入无效，请输入 0-2"
+        echoContent red ' ---> 选择错误，请重新选择'
         selectCoreInstall
         ;;
     esac
@@ -13264,17 +12783,15 @@ singBoxInstall() {
 # 核心管理
 coreVersionManageMenu() {
     if [[ -z "${coreInstallType}" && -z "${singBoxConfigPath}" ]]; then
-        echoContent red "\n  ! 未检测到任何已安装的核心，请先部署节点"
-        uiPauseReturn "  按回车键返回主菜单..." menu
+        echoContent red "\n ---> 未检测到任何已安装的核心，请先执行安装！"
         return 0
     fi
-    uiClear
-    uiHeader "核心版本与服务管理" "升级 / 回退 / 启停 / 规则与日志"
-    uiOption 1 "Xray-core 管理" "升级正式版或预览版、回退、启停、Geo 规则与日志" '\033[92m'
-    uiOption 2 "sing-box 管理" "升级正式版或预览版、版本切换、启停与日志"
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-2]: " selectCore
+    echoContent skyBlue "\n========================= 核心服务管理 ========================="
+    echoContent yellow "  1. Xray-core 管理 (升级正式版/预览版/回退/启停/Geo规则/日志)"
+    echoContent yellow "  2. sing-box 管理  (升级正式版/预览版/启停/日志)"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    read -r -p "请选择 [0-2]: " selectCore
 
     if [[ "${selectCore}" == "1" ]]; then
         xrayVersionManageMenu 1
@@ -13282,9 +12799,6 @@ coreVersionManageMenu() {
         singBoxVersionManageMenu 1
     elif [[ "${selectCore}" == "0" || -z "${selectCore}" ]]; then
         menu
-    else
-        uiNoticeMsg="输入无效，请输入 0-2"
-        coreVersionManageMenu
     fi
 }
 # 定时任务检查
@@ -13304,74 +12818,61 @@ cronFunction() {
 # 账号管理
 manageAccount() {
     if [[ "${currentInstallProtocolType}" == ",20," ]]; then
-        echoContent yellow "\n  ! 当前仅部署 Socks5 独立入站，请通过「分流与落地 -> Socks5」管理"
-        uiPauseReturn "  按回车键返回主菜单..." menu
+        echoContent yellow " ---> 仅安装 SOCKS5 入站，请通过 Socks5 入站菜单管理配置"
         return 1
     fi
     if [[ -z "${configPath}" ]]; then
-        echoContent red "\n  ! 未检测到已部署的节点配置，请先安装节点"
-        uiPauseReturn "  按回车键返回主菜单..." menu
+        echoContent red "\n ---> 未检测到已安装的协议配置，请先安装！"
         return 0
     fi
 
-    uiClear
-    uiHeader "账号与订阅管理" "增删用户会自动同步至所有已部署协议"
-    uiOption 1 "查看节点连接与详情" "按用户查看各协议链接与配置参数" '\033[92m'
-    uiOption 2 "导出用户订阅链接" "支持通用 Base64 / Clash.Meta / sing-box"
-    uiOption 3 "刷新全部用户订阅" "变更端口、域名或参数后建议重新生成"
-    uiDivider gray
-    uiOption 4 "添加新用户" "支持自定义用户名与 UUID"
-    uiOption 5 "删除已有用户" "从服务端配置与订阅中移除"
-    uiOption 6 "合并远程外部订阅" "将其他节点订阅聚合进当前用户订阅"
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
-    read -r -p "  请选择 [0-6]: " manageAccountStatus
+    echoContent skyBlue "\n======================== 账号与订阅管理 ========================"
+    echoContent yellow "提示：添加/删除用户会自动同步到所有已安装的协议与订阅中"
+    echoContent red "================================================================"
+    echoContent yellow "  1. 查看节点账号 (连接链接 / 订阅详情)"
+    echoContent yellow "  2. 查看用户订阅 (通用 Base64 / Clash.Meta / sing-box)"
+    echoContent yellow "  3. 生成/更新订阅 (重新生成全部用户订阅)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent yellow "  4. 添加新用户   (支持自定义 email 与 UUID)"
+    echoContent yellow "  5. 删除已有用户"
+    echoContent yellow "  6. 远程订阅合并 (添加/管理其他外部订阅)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    read -r -p "请选择 [0-6]: " manageAccountStatus
     case "${manageAccountStatus}" in
     0 | "")
         menu
         ;;
     1)
-        viewAccountsByUser
-        if [[ $? -ne 2 ]]; then
-            uiDivider gray
-            uiPauseReturn "  按回车键返回账号管理..."
-        fi
-        manageAccount 1
+        viewAccountsByUse
         ;;
     2)
-        viewSubscriptionByUser
-        if [[ $? -ne 2 ]]; then
-            uiPauseReturn "  按回车键返回账号管理..."
-        fi
-        manageAccount 1
+        viewSubscriptionByUse
         ;;
     3)
         subscribe
-        uiDivider gray
-        uiPauseReturn "  按回车键返回账号管理..."
-        manageAccount 1
         ;;
     4)
-        addUser
+        addUse
         ;;
     5)
-        removeUser
+        removeUse
         ;;
     6)
         addSubscribeMenu 1
         ;;
     *)
-        uiNoticeMsg="输入无效，请输入 0-6 之间的数字"
-        manageAccount
+        echoContent red " ---> 选择错误"
         ;;
     esac
 }
 
 viewAccountsByUser() {
     readInstallType
-    local users tempDir rc=0
+    local users tempDi
     users=$(collectAccountUsers) || return 1
-    selectAccountUser "${users}" || return $?
+    selectAccountUser "${users}" || return 0
     tempDir=$(mktemp -d) || return 1
     chmod 700 "${tempDir}" || {
         rm -rf "${tempDir}"
@@ -13381,8 +12882,6 @@ viewAccountsByUser() {
         trap 'rm -rf "${tempDir}"' EXIT
         showAccounts 1 "${accountSelectionKey}" "${tempDir}"
     )
-    rc=$?
-    return ${rc}
 }
 
 # Shared subscription presentation for viewing and generation.
@@ -13395,11 +12894,13 @@ showUserSubscriptions() {
         file="${publishDir}/${format}/${emailMd5}"
         [[ -s "${file}" ]] && availableFormats+=("${format}")
     done
-    printf '\n'
-    uiHeader "用户订阅专属链接" "账号标识: ${subscriptionUser} | 可用订阅: ${#availableFormats[@]} 种"
+    echoContent skyBlue "\n=============================================================="
+    echoContent green   "                 【 用户订阅专属链接 】"
+    echoContent skyBlue "=============================================================="
+    printf '  账号标识: \033[93m%s\033[0m   |   可用订阅: \033[93m%s\033[0m 种\n' "${subscriptionUser}" "${#availableFormats[@]}"
     if [[ ${#availableFormats[@]} -eq 0 ]]; then
-        echoContent yellow "  该用户尚无已生成的订阅文件，请先使用 [3. 刷新全部用户订阅]。"
-        uiDivider gray
+        echoContent yellow "  该用户尚无已生成的订阅文件，请先使用 [3. 生成/更新订阅]。"
+        echoContent skyBlue "==============================================================\n"
         return 1
     fi
     for format in "${availableFormats[@]}"; do
@@ -13418,7 +12919,7 @@ showUserSubscriptions() {
             description="适用于 sing-box 官方客户端 (含全新精细分流)"
             ;;
         esac
-        uiDivider gray
+        echoContent white "──────────────────────────────────────────────────────────────"
         printf '  \033[92m[%02d]\033[0m ' "${index}"
         echoContent skyBlue "${title}"
         echoContent gray "       适用: ${description}"
@@ -13426,10 +12927,9 @@ showUserSubscriptions() {
         echoContent yellow "       链接: \c"
         echoContent brightGreen "${subscriptionURL}"
     done
-    uiDivider gray
+    echoContent white "──────────────────────────────────────────────────────────────"
     echoContent gray "  提示：复制对应链接导入客户端即可使用，请妥善保管个人订阅。"
-    uiDivider cyan
-    printf '\n'
+    echoContent skyBlue "==============================================================\n"
 
 }
 
@@ -13437,14 +12937,14 @@ viewSubscriptionByUser() {
     readInstallType
     local users
     users=$(collectAccountUsers) || return 1
-    selectAccountUser "${users}" || return $?
+    selectAccountUser "${users}" || return 0
     readNginxSubscribe
     if [[ -z "${subscribePort}" || ! -f /etc/v2ray-agent/subscribe_local/subscribeSalt ]]; then
         echoContent yellow " ---> 尚未初始化订阅服务，正在生成/更新订阅。"
         subscribe || return 1
         readNginxSubscribe
     fi
-    local subscribeSalt emailMd5 currentDomain publishDir
+    local subscribeSalt emailMd5 currentDomain publishDi
     subscribeSalt=$(cat /etc/v2ray-agent/subscribe_local/subscribeSalt) || return 1
     emailMd5=$(printf '%s\n' "${accountSelectionKey}${subscribeSalt}" | md5sum | awk '{print $1}')
     currentDomain=${currentHost}
@@ -13564,85 +13064,68 @@ unInstallSubscribe() {
 
 # 添加订阅
 addSubscribeMenu() {
-    uiClear
-    uiHeader "合并远程外部订阅" "将其他节点订阅聚合到当前用户的本地订阅中"
-    uiOption 1 "添加远程订阅" "按 域名:端口:别名 格式接入其他机器订阅" '\033[92m'
-    uiOption 2 "移除远程订阅" "从已聚合列表中删除指定订阅条目" '\033[31m'
-    uiBackOption "返回账号管理"
-    uiConsumeNotice
-    local addSubscribeStatus
-    read -r -p "  请选择 [0-2]: " addSubscribeStatus
-    case "${addSubscribeStatus}" in
-    0 | "")
-        manageAccount 1
+    echoContent skyBlue "\n===================== 添加其他机器订阅 ======================="
+    echoContent yellow "1.添加"
+    echoContent yellow "2.移除"
+    echoContent skyBlue "--------------------------------------------------------------"
+    echoContent skyBlue "0.返回"
+    echoContent red "=============================================================="
+    read -r -p "请选择 [0-2]: " addSubscribeStatus
+    if [[ "${addSubscribeStatus}" == "0" || -z "${addSubscribeStatus}" ]]; then
         return 0
-        ;;
-    1)
+    elif [[ "${addSubscribeStatus}" == "1" ]]; then
         addOtherSubscribe
-        uiPauseReturn "  按回车键返回订阅聚合菜单..."
-        addSubscribeMenu 1
-        ;;
-    2)
+    elif [[ "${addSubscribeStatus}" == "2" ]]; then
         if [[ -f "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" ]]; then
             sed -i '/^$/d' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" >/dev/null 2>&1
         fi
         if [[ ! -s "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" ]]; then
-            echoContent yellow "\n  ---> 暂未添加任何远程外部订阅"
-            uiDivider gray
-            uiPauseReturn "  按回车键返回订阅聚合菜单..."
-            addSubscribeMenu 1
+            echoContent green " ---> 未安装其他订阅"
+            addSubscribeMenu
             return 0
         fi
         local totalSubCount
         totalSubCount=$(wc -l < "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" | tr -d '[:space:]')
-        printf '\n'
-        uiDivider gray
-        awk '{print "  "NR": "$0}' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl"
-        uiDivider gray
-        local delSubscribeIndex
-        read -r -p "  请选择要删除的订阅编号 [1-${totalSubCount}，仅支持单个删除，输入 0 或留空取消]: " delSubscribeIndex
+        awk '{print NR":"$0}' "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl"
+        read -r -p "请选择要删除的订阅编号 [1-${totalSubCount}，仅支持单个删除，输入 0 或留空取消]: " delSubscribeIndex
         if [[ "${delSubscribeIndex}" == "0" || -z "${delSubscribeIndex}" ]]; then
-            addSubscribeMenu 1
+            addSubscribeMenu
             return 0
         fi
         if ! [[ "${delSubscribeIndex}" =~ ^[1-9][0-9]*$ ]] || ((delSubscribeIndex < 1 || delSubscribeIndex > totalSubCount)); then
-            uiNoticeMsg="输入编号无效，请输入 1-${totalSubCount} 之间的整数"
-            addSubscribeMenu 1
+            echoContent red " ---> 输入编号无效，请输入 1-${totalSubCount} 之间的整数"
+            addSubscribeMenu
             return 0
         fi
 
         sed -i "$((delSubscribeIndex))d" "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" >/dev/null 2>&1
 
-        echoContent green "\n  ---> 其他机器订阅删除成功"
+        echoContent green " ---> 其他机器订阅删除成功"
         subscribe
-        uiPauseReturn "  按回车键返回订阅聚合菜单..."
-        addSubscribeMenu 1
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0-2"
-        addSubscribeMenu 1
-        ;;
-    esac
+    else
+        echoContent red " ---> 输入无效，请输入 0-2"
+        addSubscribeMenu
+    fi
 }
 # 添加其他机器clashMeta订阅
 addOtherSubscribe() {
-    echoContent yellow "\n  注意事项:"
-    echoContent gray   "    • 详细教程: https://www.v2ray-agent.com/archives/1681804748677"
-    echoContent skyBlue "    • 录入示例: www.v2ray-agent.com:443:vps1\n"
-    read -r -p "  请输入 域名:端口:机器别名 [留空返回]: " remoteSubscribeUrl
+    echoContent yellow "#注意事项:"
+    echoContent yellow "请仔细阅读以下文章： https://www.v2ray-agent.com/archives/1681804748677"
+    echoContent skyBlue "录入示例：www.v2ray-agent.com:443:vps1\n"
+    read -r -p "请输入域名 端口 机器别名:" remoteSubscribeUrl
     if [[ -z "${remoteSubscribeUrl}" ]]; then
-        return 0
+        echoContent red " ---> 不可为空"
+        addOtherSubscribe
     elif ! echo "${remoteSubscribeUrl}" | grep -q ":"; then
-        echoContent red " ---> 规则不合法（需包含冒号分隔）"
-        return 1
+        echoContent red " ---> 规则不合法"
     else
-        mkdir -p /etc/v2ray-agent/subscribe_remote
+
         if [[ -f "/etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl" ]] && grep -q "${remoteSubscribeUrl}" /etc/v2ray-agent/subscribe_remote/remoteSubscribeUrl; then
-            echoContent yellow " ---> 此订阅已添加"
-            return 0
+            echoContent red " ---> 此订阅已添加"
+            exit 0
         fi
         echo
-        read -r -p "  是否是 HTTP 订阅？[y/n]: " httpSubscribeStatus
+        read -r -p "是否是HTTP订阅？[y/n]" httpSubscribeStatus
         if [[ "${httpSubscribeStatus}" == "y" ]]; then
             remoteSubscribeUrl="${remoteSubscribeUrl}:http"
         fi
@@ -13967,7 +13450,7 @@ rule-providers:
     path: ./ruleset/chinamax_domain.yaml
   ChinaMaxIPNoIPv6:
     type: http
-    behavior: ipcidr
+    behavior: ipcid
     interval: 86400
     url: https://testingcf.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMax/ChinaMax_IP_No_IPv6.yaml
     path: ./ruleset/chinamax_ip.yaml
@@ -14250,63 +13733,45 @@ updateRemoteSubscribe() {
 
 # 切换alpn
 switchAlpn() {
-    readInstallType
-    readConfigHostPathUUID >/dev/null 2>&1
-    uiClear
-    uiHeader "切换 TLS ALPN 协商策略" "调整前置 TLS 入站的首选 ALPN 协议顺序"
-    if [[ -z "${currentAlpn}" ]]; then
-        echoContent red "\n  ! 无法读取 ALPN 配置，请检查前置 TLS 协议是否已安装"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
-        return 0
+    echoContent skyBlue "\n功能 1/${totalProgress} : 切换alpn"
+    if [[ -z ${currentAlpn} ]]; then
+        echoContent red " ---> 无法读取alpn，请检查是否安装"
+        exit 0
     fi
 
-    echoContent green "  当前 ALPN 首位 : ${currentAlpn}"
-    echoContent gray  "    • http/1.1 首位 : Trojan 可用，部分支持手动 ALPN 的 gRPC 客户端可用"
-    echoContent gray  "    • h2 首位       : gRPC 可用，部分支持手动 ALPN 的 Trojan 客户端可用"
-    echoContent gray  "    • 若客户端不支持自定义 ALPN，可通过此项调整服务端协商顺序"
-    uiDivider gray
+    echoContent red "\n=============================================================="
+    echoContent green "当前alpn首位为:${currentAlpn}"
+    echoContent yellow "  1.当http/1.1首位时，trojan可用，gRPC部分客户端可用【客户端支持手动选择alpn的可用】"
+    echoContent yellow "  2.当h2首位时，gRPC可用，trojan部分客户端可用【客户端支持手动选择alpn的可用】"
+    echoContent yellow "  3.如客户端不支持手动更换alpn，建议使用此功能更改服务端alpn顺序，来使用相应的协议"
+    echoContent red "=============================================================="
 
     if [[ "${currentAlpn}" == "http/1.1" ]]; then
-        uiOption 1 "切换 ALPN 为 h2 首位" "优先协商 HTTP/2 (h2, http/1.1)" '\033[92m'
+        echoContent yellow "1.切换alpn h2 首位"
     elif [[ "${currentAlpn}" == "h2" ]]; then
-        uiOption 1 "切换 ALPN 为 http/1.1 首位" "优先协商 HTTP/1.1 (http/1.1, h2)" '\033[92m'
+        echoContent yellow "1.切换alpn http/1.1 首位"
     else
-        echoContent red "  ! 当前 ALPN 值异常: ${currentAlpn}"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
-        return 0
+        echoContent red '不符合'
     fi
-    uiBackOption "返回站点与证书管理"
-    uiConsumeNotice
 
-    local selectSwitchAlpnType
-    read -r -p "  请选择 [0-1]: " selectSwitchAlpnType
-    case "${selectSwitchAlpnType}" in
-    0 | "")
-        siteCertMenu
-        return 0
-        ;;
-    1)
-        if [[ "${currentAlpn}" == "http/1.1" ]]; then
-            local frontingTypeJSON
-            frontingTypeJSON=$(jq -r '.inbounds[0].streamSettings.tlsSettings.alpn = ["h2","http/1.1"]' "${configPath}${frontingType}.json")
-            echo "${frontingTypeJSON}" | jq . >"${configPath}${frontingType}.json"
-        elif [[ "${currentAlpn}" == "h2" ]]; then
-            local frontingTypeJSON
-            frontingTypeJSON=$(jq -r '.inbounds[0].streamSettings.tlsSettings.alpn = ["http/1.1","h2"]' "${configPath}${frontingType}.json")
-            echo "${frontingTypeJSON}" | jq . >"${configPath}${frontingType}.json"
-        fi
-        reloadCore
-        echoContent green "\n  ✓ ALPN 顺序已切换并重载核心"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回 ALPN 管理..." switchAlpn
-        ;;
-    *)
-        uiNoticeMsg="输入无效，请输入 0 或 1"
-        switchAlpn
-        ;;
-    esac
+    echoContent red "=============================================================="
+
+    read -r -p "请选择:" selectSwitchAlpnType
+    if [[ "${selectSwitchAlpnType}" == "1" && "${currentAlpn}" == "http/1.1" ]]; then
+
+        local frontingTypeJSON
+        frontingTypeJSON=$(jq -r ".inbounds[0].streamSettings.tlsSettings.alpn = [\"h2\",\"http/1.1\"]" ${configPath}${frontingType}.json)
+        echo "${frontingTypeJSON}" | jq . >${configPath}${frontingType}.json
+
+    elif [[ "${selectSwitchAlpnType}" == "1" && "${currentAlpn}" == "h2" ]]; then
+        local frontingTypeJSON
+        frontingTypeJSON=$(jq -r ".inbounds[0].streamSettings.tlsSettings.alpn =[\"http/1.1\",\"h2\"]" ${configPath}${frontingType}.json)
+        echo "${frontingTypeJSON}" | jq . >${configPath}${frontingType}.json
+    else
+        echoContent red " ---> 选择错误"
+        exit 0
+    fi
+    reloadCore
 }
 
 # 初始化realityKey
@@ -14620,11 +14085,7 @@ manageReality() {
     readSingBoxConfig
 
     if ! echo "${currentInstallProtocolType}" | grep -q -E "7,|8,|12," || [[ -z "${coreInstallType}" ]]; then
-        uiClear
-        uiHeader "REALITY 协议管理"
-        echoContent red "\n  ! 未检测到已安装的 Reality 协议"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回协议与端口管理..." protocolPortMenu
+        echoContent red "\n ---> 未检测到已安装的 Reality 协议！"
         return 0
     fi
 
@@ -14632,19 +14093,19 @@ manageReality() {
     local curSni="" curTargetPort="443" curPublicKey=""
     if [[ "${coreInstallType}" == "1" && -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
         curSni=$(jq -r '.inbounds[1].streamSettings.realitySettings.serverNames[0] // empty' "${configPath}07_VLESS_vision_reality_inbounds.json")
-        local tStr
+        local tSt
         tStr=$(jq -r '.inbounds[1].streamSettings.realitySettings.target // empty' "${configPath}07_VLESS_vision_reality_inbounds.json")
         [[ -n "${tStr}" ]] && curTargetPort=$(echo "${tStr}" | awk -F '[:]' '{print $2}')
         curPublicKey=$(jq -r '.inbounds[1].streamSettings.realitySettings.publicKey // empty' "${configPath}07_VLESS_vision_reality_inbounds.json")
     elif [[ "${coreInstallType}" == "1" && -f "${configPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
         curSni=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
-        local tStr
+        local tSt
         tStr=$(jq -r '.inbounds[0].streamSettings.realitySettings.target // empty' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
         [[ -n "${tStr}" ]] && curTargetPort=$(echo "${tStr}" | awk -F '[:]' '{print $2}')
         curPublicKey=$(jq -r '.inbounds[0].streamSettings.realitySettings.publicKey // empty' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
     elif [[ "${coreInstallType}" == "1" && -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
         curSni=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "${configPath}12_VLESS_XHTTP_inbounds.json")
-        local tStr
+        local tSt
         tStr=$(jq -r '.inbounds[0].streamSettings.realitySettings.target // empty' "${configPath}12_VLESS_XHTTP_inbounds.json")
         [[ -n "${tStr}" ]] && curTargetPort=$(echo "${tStr}" | awk -F '[:]' '{print $2}')
         curPublicKey=$(jq -r '.inbounds[0].streamSettings.realitySettings.publicKey // empty' "${configPath}12_VLESS_XHTTP_inbounds.json")
@@ -14658,62 +14119,55 @@ manageReality() {
         curPublicKey="${singBoxVLESSRealitygRPCPublicKey}"
     fi
 
-    uiClear
-    uiHeader "REALITY 协议管理" "伪装域名、回落目标与密钥配置"
-    echoContent green "  伪装域名 (SNI)    : ${curSni:-未知}"
-    echoContent green "  目标端口 (Target) : ${curTargetPort:-443}"
-    [[ -n "${curPublicKey}" ]] && echoContent gray "  公钥 (PublicKey)  : ${curPublicKey}"
-    uiDivider gray
-    uiOption 1 "更换伪装域名 (SNI)" "修改 SNI 与目标端口并同步更新订阅" '\033[92m'
-    uiOption 2 "重置密钥与配置" "重新生成 Reality 密钥对并重建节点配置"
-    uiBackOption "返回协议与端口管理"
-    uiConsumeNotice
+    echoContent skyBlue "\n=========================== REALITY 管理 ==========================="
+    echoContent yellow "当前 Reality 配置概览："
+    echoContent green  "  - 伪装域名 (SNI)   : ${curSni:-未知}"
+    echoContent green  "  - 目标端口 (Target): ${curTargetPort:-443}"
+    [[ -n "${curPublicKey}" ]] && echoContent green "  - 公钥 (PublicKey) : ${curPublicKey}"
+    echoContent red "===================================================================="
+    echoContent yellow "1. 更换伪装域名 (SNI)"
+    echoContent yellow "2. 完整重新配置 Reality (重新生成密钥/配置)"
+    echoContent skyBlue "0. 返回主菜单"
+    echoContent red "===================================================================="
 
     local selectRealityManageType
-    read -r -p "  请选择 [0-2]: " selectRealityManageType
+    read -r -p "请选择 [0-2]: " selectRealityManageType
 
     case "${selectRealityManageType}" in
-    0 | "")
-        protocolPortMenu
-        ;;
     1)
-        printf '\n'
-        uiDivider skyBlue
-        echoContent skyBlue "  ◆ 更换伪装域名 (SNI)"
-        uiDivider gray
-        echoContent gray "  常用推荐 SNI（输入序号可快速选用，或直接输入自定义域名）:"
-        uiOption 1 "www.samsung.com" "三星官网（TLSv1.3 / X25519 兼容性佳）" '\033[92m'
-        uiOption 2 "aws.amazon.com" "亚马逊云（大厂站点，适欧美/全局链路）"
-        uiDivider gray
+        echoContent skyBlue "\n----------------------- 更换伪装域名 (SNI) -----------------------"
+        echoContent yellow "常用推荐 SNI 参考："
+        echoContent green  "  1. www.samsung.com"
+        echoContent green  "  2. aws.amazon.com"
+        echo
         local newSni
-        read -r -p "  请输入新 SNI 或序号 [1-2，留空返回]: " newSni
+        read -r -p "请输入新的伪装域名 [直接输入数字 1-2 可快速选择，也可输入自定义域名]: " newSni
 
         case "${newSni}" in
-        "")
-            manageReality
-            return 0
-            ;;
         1) newSni="www.samsung.com" ;;
         2) newSni="aws.amazon.com" ;;
         esac
 
+        if [[ -z "${newSni}" ]]; then
+            echoContent red " ---> 伪装域名不能为空！"
+            return 1
+        fi
+
         # 域名合法性粗校验
         if ! [[ "${newSni}" =~ ^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}$ ]]; then
-            uiNoticeMsg="域名格式不正确: ${newSni}"
-            manageReality
+            echoContent red " ---> 域名格式不正确: ${newSni}"
             return 1
         fi
 
         local newTargetPort
-        read -r -p "  目标回落端口 [回车默认 443]: " newTargetPort
+        read -r -p "请输入目标回落端口 [回车默认 443]: " newTargetPort
         newTargetPort=${newTargetPort:-443}
         if ! [[ "${newTargetPort}" =~ ^[0-9]{1,5}$ ]] || ((newTargetPort < 1 || newTargetPort > 65535)); then
-            uiNoticeMsg="目标端口必须是 1-65535 之间的数字"
-            manageReality
+            echoContent red " ---> 目标端口必须是 1 到 65535 之间数字！"
             return 1
         fi
 
-        echoContent skyBlue "\n  ---> 正在更新 Reality 配置..."
+        echoContent skyBlue "\n ---> 正在更新 Reality 配置文件..."
         local target="${newSni}:${newTargetPort}"
 
         # 1. Xray 07_VLESS_vision_reality_inbounds.json
@@ -14778,7 +14232,7 @@ manageReality() {
                 "${file}" > "${file}.tmp" && mv -f "${file}.tmp" "${file}"
         fi
 
-        echoContent skyBlue "  ---> 正在重启服务并同步更新订阅..."
+        echoContent skyBlue " ---> 正在重启服务并同步更新订阅..."
         reloadCore
         readInstallType
         readInstallProtocolType
@@ -14790,46 +14244,35 @@ manageReality() {
             subscribe false false >/dev/null 2>&1
         fi
 
-        printf '\n'
-        uiDivider green
-        echoContent brightGreen "  ✓ Reality 伪装域名已更新为: ${newSni} (目标: ${target})"
-        echoContent white "    • 核心已重载，订阅链接已自动同步"
-        echoContent gray  "    • 请在客户端（v2rayNG / Clash / Mihomo）点击更新订阅生效"
-        uiDivider green
-        uiPauseReturn "  按回车键返回 REALITY 管理..." manageReality
+        echoContent green "\n================================================================"
+        echoContent green " ---> 成功！Reality 伪装域名已更改为: ${newSni} (目标: ${target})"
+        echoContent green " ---> 服务已重启，订阅已自动同步更新！"
+        echoContent yellow " ---> 请在客户端（v2rayNG / Clash）点击【更新订阅】即可立即生效。"
+        echoContent green "================================================================\n"
         ;;
     2)
-        selectCustomInstallType=""
         if [[ "${coreInstallType}" == "1" ]]; then
-            if echo "${currentInstallProtocolType}" | grep -q ",7,"; then
-                selectCustomInstallType=",7,"
-            fi
-            if echo "${currentInstallProtocolType}" | grep -q ",12,"; then
-                selectCustomInstallType="${selectCustomInstallType:-,}12,"
-            fi
-            [[ -z "${selectCustomInstallType}" ]] && selectCustomInstallType=",7,"
+            selectCustomInstallType=",7,"
             initXrayConfig custom 1 true
         elif [[ "${coreInstallType}" == "2" ]]; then
             if echo "${currentInstallProtocolType}" | grep -q ",7,"; then
                 selectCustomInstallType=",7,"
             fi
             if echo "${currentInstallProtocolType}" | grep -q ",8,"; then
-                selectCustomInstallType="${selectCustomInstallType:-,}8,"
+                selectCustomInstallType="${selectCustomInstallType},8,"
             fi
             initSingBoxConfig custom 1 true || return 1
         fi
         reloadCore
         subscribe false
-        uiPauseReturn "  按回车键返回 REALITY 管理..." manageReality
         ;;
     *)
-        uiNoticeMsg="输入无效，请输入 0-2"
-        manageReality
+        return 0
         ;;
     esac
 }
 
-# 安装reality scanner
+# 安装reality scanne
 installRealityScanner() {
     if [[ ! -f "/etc/v2ray-agent/xray/reality_scan/RealiTLScanner-linux-64" ]]; then
         version=$(curl -s https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1 | jq -r '.[]|.tag_name')
@@ -14837,7 +14280,7 @@ installRealityScanner() {
         chmod 655 /etc/v2ray-agent/xray/reality_scan/RealiTLScanner-linux-64
     fi
 }
-# reality scanner
+# reality scanne
 realityScanner() {
     echoContent skyBlue "\n进度 1/1 : 扫描Reality域名"
     echoContent red "\n=============================================================="
@@ -14878,40 +14321,31 @@ realityScanner() {
 }
 # tuic管理
 manageTuic() {
-    readInstallType
-    readInstallProtocolType
-    readSingBoxConfig >/dev/null 2>&1
-    uiClear
-    uiHeader "TUIC 协议管理" "基于 sing-box 内核的高速 QUIC 协议"
+    echoContent skyBlue "\n========================= TUIC 协议管理 ========================="
     local tuicStatus=
     if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/v2ray-agent/sing-box/conf/config/09_tuic_inbounds.json" ]]; then
         echoContent green "  当前状态 : 已安装 (基于 sing-box 内核)"
-        uiDivider gray
-        uiOption 1 "重新安装 TUIC" "重建 TUIC 配置与监听端口"
-        uiOption 2 "卸载 TUIC    " "移除 TUIC 入站与相关规则" '\033[31m'
-        uiOption 3 "端口跳跃管理 " "配置或查看 TUIC 多端口跳跃" '\033[92m'
+        echoContent red "================================================================"
+        echoContent yellow "  1. 重新安装 TUIC"
+        echoContent yellow "  2. 卸载 TUIC"
+        echoContent yellow "  3. TUIC 端口跳跃管理"
         tuicStatus=true
     else
         echoContent yellow "  当前状态 : 未安装 (依赖 sing-box 内核)"
-        uiDivider gray
-        uiOption 1 "安装 TUIC    " "在 sing-box 中新增 TUIC 入站" '\033[92m'
+        echoContent red "================================================================"
+        echoContent yellow "  1. 安装 TUIC"
     fi
-    uiBackOption "返回协议与端口管理"
-    uiConsumeNotice
-    read -r -p "  请选择: " installTuicStatus
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
+    read -r -p "请选择: " installTuicStatus
     if [[ "${installTuicStatus}" == "0" || -z "${installTuicStatus}" ]]; then
-        protocolPortMenu
+        menu
     elif [[ "${installTuicStatus}" == "1" ]]; then
         singBoxTuicInstall
-        uiPauseReturn "  按回车键返回 TUIC 管理..." manageTuic
     elif [[ "${installTuicStatus}" == "2" && "${tuicStatus}" == "true" ]]; then
         unInstallSingBox tuic
-        uiPauseReturn "  按回车键返回 TUIC 管理..." manageTuic
     elif [[ "${installTuicStatus}" == "3" && "${tuicStatus}" == "true" ]]; then
         portHoppingMenu tuic
-    else
-        uiNoticeMsg="输入编号无效，请重新选择"
-        manageTuic
     fi
 }
 # sing-box log日志
@@ -14939,47 +14373,40 @@ EOF
 # sing-box 版本管理
 singBoxVersionManageMenu() {
     if [[ -z "${singBoxConfigPath}" ]]; then
-        uiClear
-        uiHeader "sing-box 核心管理"
-        echoContent red "\n  ! 未检测到 sing-box 安装目录，请先安装 sing-box"
-        uiDivider gray
-        uiPauseReturn "  按回车键返回核心管理..." coreVersionManageMenu
+        echoContent red "\n ---> 未检测到 sing-box 安装目录，请先安装 sing-box"
         return 0
     fi
     local sbVer=""
     if [[ -x "/etc/v2ray-agent/sing-box/sing-box" ]]; then
         sbVer=$(/etc/v2ray-agent/sing-box/sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
     fi
-    uiClear
-    uiHeader "sing-box 核心管理" "${sbVer:+当前版本: ${sbVer}}"
-    uiOption 1 "升级 sing-box 正式版" "稳定发布通道 (Stable)" '\033[92m'
-    uiOption 2 "升级 sing-box 预览版" "新特性测试通道 (Pre-release / 1.15+)"
-    uiDivider gray
-    uiOption 3 "关闭 sing-box" "停止当前运行进程"
-    uiOption 4 "启动 sing-box" "启动 sing-box 服务"
-    uiOption 5 "重启 sing-box" "重载配置并重启服务"
-    uiDivider gray
+    echoContent skyBlue "\n======================== sing-box 管理 ========================"
+    [[ -n "${sbVer}" ]] && echoContent green "  当前版本 : ${sbVer}"
+    echoContent red "================================================================"
+    echoContent yellow "  1. 升级 sing-box 正式版 (Stable)"
+    echoContent yellow "  2. 升级 sing-box 预览版 (Pre-release / 1.15+)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent yellow "  3. 关闭 sing-box"
+    echoContent yellow "  4. 启动 sing-box"
+    echoContent yellow "  5. 重启 sing-box"
+    echoContent skyBlue "----------------------------------------------------------------"
     local logStatus=
     if [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}log.json" && "$(jq -r .log.disabled "${singBoxConfigPath}log.json")" == "false" ]]; then
-        uiOption 6 "关闭调试日志" "停止写入 debug 级别日志"
+        echoContent yellow "  6. 关闭调试日志"
         logStatus=true
     else
-        uiOption 6 "启用调试日志" "开启 debug 级别日志用于排障"
+        echoContent yellow "  6. 启用调试日志"
         logStatus=false
     fi
 
-    uiOption 7 "实时查看日志" "持续输出 box.log（按 Ctrl+C 退出）"
-    uiBackOption "返回核心管理"
-    uiConsumeNotice
+    echoContent yellow "  7. 实时查看日志"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
 
-    read -r -p "  请选择 [0-7]: " selectSingBoxType
+    read -r -p "请选择 [0-7]: " selectSingBoxType
     if [[ "${selectSingBoxType}" == "0" || -z "${selectSingBoxType}" ]]; then
-        coreVersionManageMenu 1
-        return 0
-    fi
-    if ! [[ "${selectSingBoxType}" =~ ^[1-7]$ ]]; then
-        uiNoticeMsg="输入无效，请输入 0-7 之间的数字"
-        singBoxVersionManageMenu
+        menu
         return 0
     fi
     if [[ ! -f "${singBoxConfigPath}../box.log" ]]; then
@@ -14989,7 +14416,8 @@ singBoxVersionManageMenu() {
         case "${selectSingBoxType}" in
         3)
             socks5SingBoxService stop
-            uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
+            read -r -p "按回车键返回 sing-box 管理..." _
+            singBoxVersionManageMenu
             return 0
             ;;
         4 | 5)
@@ -14998,7 +14426,8 @@ singBoxVersionManageMenu() {
             socks5SingBoxService start || return 1
             sleep 1
             socks5SingBoxService status
-            uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
+            read -r -p "按回车键返回 sing-box 管理..." _
+            singBoxVersionManageMenu
             return 0
             ;;
         esac
@@ -15013,7 +14442,6 @@ singBoxVersionManageMenu() {
             handleSingBox stop
             handleSingBox start
         fi
-        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "2" ]]; then
         prereleaseStatus=true
         installSingBox 1 || return 1
@@ -15024,17 +14452,13 @@ singBoxVersionManageMenu() {
             handleSingBox stop
             handleSingBox start
         fi
-        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "3" ]]; then
         handleSingBox stop
-        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "4" ]]; then
         handleSingBox start
-        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "5" ]]; then
         handleSingBox stop
         handleSingBox start
-        uiPauseReturn "  按回车键返回 sing-box 管理..." singBoxVersionManageMenu
     elif [[ "${selectSingBoxType}" == "6" ]]; then
         singBoxLog ${logStatus}
         if [[ "${logStatus}" == "false" ]]; then
@@ -15047,20 +14471,20 @@ singBoxVersionManageMenu() {
 
 # 节点部署与重装子菜单
 deployNodeMenu() {
-    uiClear
-    uiHeader "节点部署与重装" "按需选择预设方案或自定义协议组合"
-    uiOption 1 "黄金抗封锁 3 件套" "Reality + Hysteria2 + Vision 零冲突预设 [推荐]" '\033[92m'
-    uiOption 2 "一键无域名安装" "仅部署 Reality 系列，无需域名与证书"
+    echoContent skyBlue "\n======================= 节点部署与重装 ======================="
+    echoContent green  "  1. 黄金抗封锁 3 件套 [推荐] (Reality + Hy2 + Vision 零冲突预设)"
+    echoContent yellow "  2. 一键无域名安装         (Reality 免域名极速部署)"
     if [[ -n "${coreInstallType}" ]]; then
-        uiOption 3 "重新完整安装" "使用自有域名部署全套主流协议"
+        echoContent yellow "  3. 重新完整安装           (带域名全套协议)"
     else
-        uiOption 3 "完整安装      " "使用自有域名部署全套主流协议"
+        echoContent yellow "  3. 完整安装               (带域名全套协议)"
     fi
-    uiOption 4 "自定义组合安装" "自由勾选所需协议与核心"
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
+    echoContent yellow "  4. 自定义组合安装         (按需勾选指定协议)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
     local selDeploy
-    read -r -p "  请选择 [0-4]: " selDeploy
+    read -r -p "请选择 [0-4]: " selDeploy
     case "${selDeploy}" in
     1) installGoldenTrio ;;
     2)
@@ -15077,7 +14501,7 @@ deployNodeMenu() {
         ;;
     0 | "") menu ;;
     *)
-        uiNoticeMsg="输入编号无效，请输入 0-4"
+        echoContent red " ---> 输入编号无效，请重新输入 [0-4]"
         deployNodeMenu
         ;;
     esac
@@ -15087,36 +14511,16 @@ deployNodeMenu() {
 protocolPortMenu() {
     readInstallType
     readInstallProtocolType
-    readSingBoxConfig >/dev/null 2>&1
-    uiClear
-    uiHeader "协议与端口管理" "调整监听端口、伪装域名或单协议运行参数"
-    local realityHint="(切换伪装域名 SNI / 重置 Reality 密钥)"
-    if echo "${currentInstallProtocolType}" | grep -q -E "7,|8,|12,"; then
-        local activeSni="${xrayVLESSRealityServerName:-${xrayVLESSRealityXHTTPServerName:-${singBoxVLESSRealityVisionServerName:-${singBoxVLESSRealityGRPCServerName:-}}}}"
-        [[ -n "${activeSni}" ]] && realityHint="[当前 SNI: ${activeSni}] 更换伪装域名或重置密钥"
-    fi
-    local hy2Hint="(端口跳跃 / 期望带宽与 BBR 切换)"
-    if echo "${currentInstallProtocolType}" | grep -q ",6,"; then
-        local hy2DisplayPort="${hysteriaPort:-${xrayHysteria2Port:-${singBoxHysteria2Port:-443}}}"
-        if ! isHysteria2SpeedSet "${hysteria2ClientDownloadSpeed}" && ! isHysteria2SpeedSet "${hysteria2ClientUploadSpeed}"; then
-            hy2Hint="[当前: 纯 BBR | UDP ${hy2DisplayPort}] 端口跳跃或配置 Brutal 速率"
-        else
-            hy2Hint="[当前: Brutal ${hysteria2ClientDownloadSpeed:-0}/${hysteria2ClientUploadSpeed:-0}M | UDP ${hy2DisplayPort}] 端口跳跃或切换 BBR"
-        fi
-    fi
-    local tuicHint="(安装 / 卸载 / 端口跳跃)"
-    if echo "${currentInstallProtocolType}" | grep -q ",9," && [[ -n "${singBoxTuicPort:-}" ]]; then
-        tuicHint="[当前: UDP ${singBoxTuicPort}] 协议管理与端口跳跃"
-    fi
-
-    uiOption 1 "全局端口管理  " "批量修改已装协议端口，联动防火墙与订阅"
-    uiOption 2 "REALITY 管理  " "${realityHint}"
-    uiOption 3 "Hysteria2 管理" "${hy2Hint}" '\033[92m'
-    uiOption 4 "TUIC 协议管理 " "${tuicHint}"
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
+    echoContent skyBlue "\n======================= 协议与端口管理 ======================="
+    echoContent yellow "  1. 端口管理       (全协议端口修改 / 防火墙联动 / 订阅刷新)"
+    echoContent yellow "  2. REALITY 管理   (一键更换伪装域名 SNI / 密钥重置)"
+    echoContent yellow "  3. Hysteria2 管理 (端口跳跃 / 带宽与纯 BBR 切换)"
+    echoContent yellow "  4. TUIC 协议管理  (安装 / 卸载 / 端口跳跃)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
     local selProto
-    read -r -p "  请选择 [0-4]: " selProto
+    read -r -p "请选择 [0-4]: " selProto
     case "${selProto}" in
     1) portManagement ;;
     2) manageReality 1 ;;
@@ -15124,39 +14528,30 @@ protocolPortMenu() {
     4) manageTuic ;;
     0 | "") menu ;;
     *)
-        uiNoticeMsg="输入编号无效，请输入 0-4"
+        echoContent red " ---> 输入编号无效，请重新输入 [0-4]"
         protocolPortMenu
         ;;
     esac
-}
-
-# 交互式 SSL 证书检查与续期入口
-renewalTLSMenu() {
-    uiClear
-    uiHeader "SSL 证书检查与续期" "检查证书真实到期时间，进入续期窗口将自动续签"
-    renewalTLS 1
-    uiDivider gray
-    uiPauseReturn "  按回车键返回站点与证书管理..." siteCertMenu
 }
 
 # 站点与证书管理综合菜单
 siteCertMenu() {
     readInstallType
     readInstallProtocolType
-    uiClear
-    uiHeader "站点与证书管理" "TLS 证书、优选节点、伪装站点与访问控制"
-    uiOption 1 "SSL 证书管理  " "检查证书有效期，临近到期自动续期"
-    uiOption 2 "CDN 优选节点  " "添加或管理 Cloudflare 等优选域名 / IP"
-    uiOption 3 "切换 TLS ALPN " "自定义 TLS ALPN 协商策略"
-    uiOption 4 "更换伪装站点  " "10 款内置静态模板或外部 302 跳转"
-    uiOption 5 "BT 与高危端口 " "阻断 BT 下载流量与常见高危端口"
-    uiOption 6 "域名黑名单管理" "屏蔽指定域名出站访问"
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
+    echoContent skyBlue "\n======================= 站点与证书管理 ======================="
+    echoContent yellow "  1. SSL 证书管理   (手动更新证书 / 切换证书机构)"
+    echoContent yellow "  2. CDN 优选节点   (添加/管理 Cloudflare 等优选域名或 IP)"
+    echoContent yellow "  3. 切换 TLS ALPN  (自定义 ALPN 协商策略)"
+    echoContent yellow "  4. 更换伪装站点   (10 款内置静态模板 / 302 跳转)"
+    echoContent yellow "  5. BT 与高危端口  (封禁 BT 下载与高危端口)"
+    echoContent yellow "  6. 域名黑名单     (访问控制与域名屏蔽管理)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
     local selSiteCert
-    read -r -p "  请选择 [0-6]: " selSiteCert
+    read -r -p "请选择 [0-6]: " selSiteCert
     case "${selSiteCert}" in
-    1) renewalTLSMenu ;;
+    1) renewalTLS 1 ;;
     2) manageCDN 1 ;;
     3) switchAlpn 1 ;;
     4) updateNginxBlog 1 ;;
@@ -15164,7 +14559,7 @@ siteCertMenu() {
     6) blacklist 1 ;;
     0 | "") menu ;;
     *)
-        uiNoticeMsg="输入编号无效，请输入 0-6"
+        echoContent red " ---> 输入编号无效，请重新输入 [0-6]"
         siteCertMenu
         ;;
     esac
@@ -15172,20 +14567,20 @@ siteCertMenu() {
 
 # 脚本更新与卸载子菜单
 scriptMaintainMenu() {
-    uiClear
-    uiHeader "脚本更新与卸载" "同步远程仓库最新版本或卸载清理本地组件"
-    uiOption 1 "更新管理脚本  " "从 GitHub 同步最新版本" '\033[92m'
-    uiOption 2 "卸载管理脚本  " "删除组件、服务与规则（保留已有 TLS 证书）" '\033[31m'
-    uiBackOption "返回主菜单"
-    uiConsumeNotice
+    echoContent skyBlue "\n======================= 脚本更新与卸载 ======================="
+    echoContent yellow "  1. 更新管理脚本   (从 GitHub 同步最新版本)"
+    echoContent red    "  2. 卸载管理脚本   (彻底清理所有服务与配置)"
+    echoContent skyBlue "----------------------------------------------------------------"
+    echoContent skyBlue "  0. 返回主菜单"
+    echoContent red "================================================================"
     local selMaint
-    read -r -p "  请选择 [0-2]: " selMaint
+    read -r -p "请选择 [0-2]: " selMaint
     case "${selMaint}" in
     1) updateV2RayAgent 1 ;;
     2) unInstall 1 ;;
     0 | "") menu ;;
     *)
-        uiNoticeMsg="输入编号无效，请输入 0-2"
+        echoContent red " ---> 输入编号无效，请重新输入 [0-2]"
         scriptMaintainMenu
         ;;
     esac
@@ -15200,32 +14595,30 @@ menu() {
     readCustomPort >/dev/null 2>&1
     readSingBoxConfig >/dev/null 2>&1
 
-    uiClear
-    echoContent skyBlue "╭──────────────────────────────────────────────────────────────╮"
-    echoContent brightGreen "│  v2ray-agent (修改版) - v3.5.42-pr3         快捷命令: vasma  │"
+    echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
+    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr4         快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
-    uiDivider gray
-    echoContent skyBlue "  [ 部署与账号 ]"
-    uiOption 1 "节点部署与重装" "黄金3件套 / 无域名 Reality / 完整 / 自定义"
-    uiOption 2 "账号与订阅管理" "查看节点连接 / 多格式订阅 / 增删用户"
-    printf '\n'
-    echoContent skyBlue "  [ 协议与网络 ]"
-    uiOption 3 "协议与端口管理" "端口修改 / Reality SNI / Hy2 带宽与 BBR"
-    uiOption 4 "智能分流与落地" "WARP 出站 / IPv6 / Socks5 落地 / DNS"
-    uiOption 5 "站点与证书管理" "SSL 证书 / CDN 优选 / 伪装站 / 安全规则"
-    printf '\n'
-    echoContent skyBlue "  [ 运维与诊断 ]"
-    uiOption 6 "节点健康自检  " "端口实测 / BBR 状态 / 证书 / Reality 探活" '\033[92m'
-    uiOption 7 "核心与日志管理" "Xray / sing-box 升降级 / 启停 / 调试日志"
-    uiOption 8 "BBR 与系统调优" "安装原版 BBR+FQ / Swap / 系统优化"
-    uiOption 9 "脚本更新与卸载" "同步 GitHub 最新版 / 卸载清理组件"
-    uiBackOption "退出脚本"
-    uiConsumeNotice
+    echoContent skyBlue "────────────────────────────────────────────────────────────────"
+    echoContent skyBlue "  [部署与账号]"
+    echoContent yellow "    1. 节点部署与重装  (黄金3件套 / 无域名Reality / 完整 / 自定义)"
+    echoContent yellow "    2. 账号与订阅管理  (查看节点 / 订阅链接 / 多用户)"
+    echoContent skyBlue "\n  [协议与网络]"
+    echoContent yellow "    3. 协议与端口管理  (全协议改端口 / Reality SNI / Hy2带宽与BBR / TUIC)"
+    echoContent yellow "    4. 智能分流与落地  (WARP / IPv6 / Socks5落地 / DNS)"
+    echoContent yellow "    5. 站点与证书管理  (SSL证书 / CDN优选 / 伪装站 / 禁BT与黑名单)"
+    echoContent skyBlue "\n  [运维与诊断]"
+    echoContent green  "    6. 节点健康自检    (端口实测 / BBR / 证书 / Reality SNI探活)"
+    echoContent yellow "    7. 核心与日志管理  (Xray / sing-box 升级 / 切换核心 / 调试日志)"
+    echoContent yellow "    8. BBR 与系统调优  (安装原版 BBR+FQ / Swap / DD 脚本)"
+    echoContent yellow "    9. 脚本更新与卸载  (同步最新版 / 彻底清理)"
+    echoContent skyBlue "────────────────────────────────────────────────────────────────"
+    echoContent skyBlue "    0. 退出脚本"
+    echoContent red "================================================================"
     mkdirTools
     aliasInstall
-    read -r -p "  请选择 [0-9]: " selectInstallType
+    read -r -p "请输入选项编号 [0-9]: " selectInstallType
     case ${selectInstallType} in
     0 | "")
         exit 0
@@ -15258,7 +14651,7 @@ menu() {
         scriptMaintainMenu
         ;;
     *)
-        uiNoticeMsg="输入编号无效，请输入 0-9"
+        echoContent red "\n ---> 输入编号无效，请重新输入 [0-9]"
         menu
         ;;
     esac
