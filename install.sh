@@ -1023,8 +1023,8 @@ allowPort() {
     if command -v dpkg >/dev/null 2>&1 && dpkg -l | grep -q "^[[:space:]]*ii[[:space:]]\+ufw"; then
         if ufw status | grep -q "Status: active"; then
             if ! ufw status | grep -q "$1/${type}"; then
-                sudo ufw allow "$1/${type}"
-                checkUFWAllowPort "$1"
+                sudo ufw allow "$1/${type}" || return 1
+                checkUFWAllowPort "$1" || return 1
             fi
         fi
     elif systemctl status firewalld 2>/dev/null | grep -q "active (running)"; then
@@ -1035,29 +1035,29 @@ allowPort() {
             if echo "${firewallPort}" | grep -q ":"; then
                 firewallPort=$(echo "${firewallPort}" | awk -F ":" '{print $1"-"$2}')
             fi
-            firewall-cmd --zone=public --add-port="${firewallPort}/${type}" --permanent
-            checkFirewalldAllowPort "${firewallPort}"
+            firewall-cmd --zone=public --add-port="${firewallPort}/${type}" --permanent || return 1
+            checkFirewalldAllowPort "${firewallPort}" || return 1
         fi
 
         if echo "${updateFirewalldStatus}" | grep -q "true"; then
-            firewall-cmd --reload
+            firewall-cmd --reload || return 1
         fi
     elif rc-update show 2>/dev/null | grep -q ufw; then
         if ufw status | grep -q "Status: active"; then
             if ! ufw status | grep -q "$1/${type}"; then
-                sudo ufw allow "$1/${type}"
-                checkUFWAllowPort "$1"
+                sudo ufw allow "$1/${type}" || return 1
+                checkUFWAllowPort "$1" || return 1
             fi
         fi
     elif command -v dpkg >/dev/null 2>&1 && dpkg -l | grep -q "^[[:space:]]*ii[[:space:]]\+netfilter-persistent" && systemctl status netfilter-persistent 2>/dev/null | grep -q "active (exited)"; then
         local updateFirewalldStatus=
         if ! iptables -L | grep -q "$1/${type}(mack-a)"; then
             updateFirewalldStatus=true
-            iptables -I INPUT -p "${type}" --dport "$1" -m comment --comment "allow $1/${type}(mack-a)" -j ACCEPT
+            iptables -I INPUT -p "${type}" --dport "$1" -m comment --comment "allow $1/${type}(mack-a)" -j ACCEPT || return 1
         fi
 
         if echo "${updateFirewalldStatus}" | grep -q "true"; then
-            netfilter-persistent save
+            netfilter-persistent save || return 1
         fi
     fi
 }
@@ -1086,7 +1086,7 @@ checkUFWAllowPort() {
         echoContent green " ---> $1端口开放成功"
     else
         echoContent red " ---> $1端口开放失败"
-        exit 0
+        return 1
     fi
 }
 
@@ -1096,7 +1096,7 @@ checkFirewalldAllowPort() {
         echoContent green " ---> $1端口开放成功"
     else
         echoContent red " ---> $1端口开放失败"
-        exit 0
+        return 1
     fi
 }
 
@@ -5928,14 +5928,22 @@ initSingBoxConfig() {
     fi
 
     if [[ -z "${addClientsStatus}" ]]; then
-        echoContent yellow "请输入自定义UUID[需合法]，[回车]随机UUID"
-        read -r -p 'UUID:' customUUID
+        while :; do
+            echoContent yellow "请输入自定义UUID[需合法]，[回车]随机UUID"
+            read -r -p 'UUID:' customUUID
 
-        if [[ -n ${customUUID} ]]; then
-            uuid=${customUUID}
-        else
-            uuid=$(/etc/v2ray-agent/sing-box/sing-box generate uuid)
-        fi
+            if [[ -n ${customUUID} ]]; then
+                if isValidUUID "${customUUID}"; then
+                    uuid=${customUUID}
+                    break
+                else
+                    echoContent red " ---> UUID 格式不合法（需标准 8-4-4-4-12 十六进制），请重新输入"
+                fi
+            else
+                uuid=$(/etc/v2ray-agent/sing-box/sing-box generate uuid)
+                break
+            fi
+        done
 
         echoContent yellow "\n请输入自定义用户名[需合法]，[回车]随机用户名"
         read -r -p '用户名:' customEmail
@@ -8260,9 +8268,19 @@ portManagement() {
     fi
 
     # 防火墙放行新端口
-    allowPort "${newPort}" "${targetType}"
-    if [[ "${targetType}" == "tcp" ]]; then
-        allowPort "${newPort}" "udp"
+    if ! allowPort "${newPort}" "${targetType}"; then
+        rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}" "${hopChanged}" "${hopStartBak}" "${hopEndBak}" "${hopIntervalBak}"
+        echoContent red " ---> 防火墙放行 ${newPort}/${targetType} 失败，已自动回滚端口至 [${oldPort}]"
+        read -r -p "按回车键返回端口管理..." _
+        portManagement
+        return 0
+    fi
+    if [[ "${targetType}" == "tcp" ]] && ! allowPort "${newPort}" "udp"; then
+        rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}" "${hopChanged}" "${hopStartBak}" "${hopEndBak}" "${hopIntervalBak}"
+        echoContent red " ---> 防火墙放行 ${newPort}/udp 失败，已自动回滚端口至 [${oldPort}]"
+        read -r -p "按回车键返回端口管理..." _
+        portManagement
+        return 0
     fi
 
     # 重启服务
@@ -13110,12 +13128,9 @@ customXrayInstall() {
 
 # 跨核心覆盖或重装前确认并自动备份 /etc/v2ray-agent
 confirmCrossCoreDeletion() {
-    local targetCore=${1:-}
+    local targetCore=${1:-} handoffMode=${2:-}
     if [[ "${crossCoreConfirmed}" == "true" ]]; then
         crossCoreConfirmed=false
-        return 0
-    fi
-    if [[ "${lastInstallationConfig}" == "true" ]]; then
         return 0
     fi
     readInstallType
@@ -13156,7 +13171,11 @@ confirmCrossCoreDeletion() {
             return 1
         fi
     fi
-    crossCoreConfirmed=true
+    if [[ "${handoffMode}" == "handoff" ]]; then
+        crossCoreConfirmed=true
+    else
+        crossCoreConfirmed=false
+    fi
     return 0
 }
 
@@ -13251,7 +13270,7 @@ installGoldenTrio() {
         targetTrioCore=$([[ "${trioCoreChoice}" == "1" ]] && echo xray || echo sing-box)
         goldenTrioPreset=true
         selectCustomInstallType=",0,6,7,"
-        confirmCrossCoreDeletion "${targetTrioCore}" || {
+        confirmCrossCoreDeletion "${targetTrioCore}" handoff || {
             goldenTrioPreset=false
             crossCoreConfirmed=false
             read -r -p "按回车键返回部署菜单..." _
@@ -15521,6 +15540,7 @@ scriptMaintainMenu() {
 # 主菜单
 menu() {
     cd "$HOME" || exit
+    crossCoreConfirmed=false
     readInstallType
     readInstallProtocolType
     readConfigHostPathUUID >/dev/null 2>&1
