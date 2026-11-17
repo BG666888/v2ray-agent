@@ -14199,7 +14199,14 @@ updateRemoteSubscribe() {
         default=$(curl -s "${subscribeType}://${remoteUrl}/s/default/${emailMD5}")
 
         if ! echo "${default}" | grep -q "nginx" && [[ -n "${default}" ]]; then
-            default=$(echo "${default}" | base64 -d | sed "s/#${email}/#${email}_${serverAlias}/g")
+            local encodedEmail encodedAlias
+            encodedEmail=$(urlEncode "${email}")
+            encodedAlias=$(urlEncode "${serverAlias}")
+            if [[ -n "${encodedEmail}" && "${encodedEmail}" != "${email}" ]]; then
+                default=$(echo "${default}" | base64 -d | sed -e "s|#${encodedEmail}|#${encodedEmail}_${encodedAlias}|g" -e "s|#${email}|#${encodedEmail}_${encodedAlias}|g")
+            else
+                default=$(echo "${default}" | base64 -d | sed "s|#${email}|#${email}_${encodedAlias}|g")
+            fi
             echo "${default}" >>"${publishPath}/default/${emailMD5}"
 
             echoContent green " ---> 通用订阅 ${remoteUrl}:${email} 更新成功"
