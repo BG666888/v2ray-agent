@@ -1,7 +1,7 @@
 # v2ray-agent (修改版)
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Version: v3.5.42-pr7](https://img.shields.io/badge/Version-v3.5.42--pr7-green.svg)](https://github.com/BG666888/v2ray-agent)
+[![Version: v3.5.42-pr8](https://img.shields.io/badge/Version-v3.5.42--pr8-green.svg)](https://github.com/BG666888/v2ray-agent)
 
 基于 Bash 的 **Xray-core / sing-box** 多协议一体化管理脚本（基于 `mack-a/v2ray-agent` 进行深度重构、特性增强与交互净化）。
 
@@ -13,7 +13,7 @@
 在 root 权限的 Linux 服务器（Ubuntu / Debian / CentOS / Alpine）上执行：
 
 ```bash
-wget -P /root -N --no-check-certificate "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh" && chmod 700 /root/install.sh && /root/install.sh
+wget -P /root -N "https://raw.githubusercontent.com/BG666888/v2ray-agent/master/install.sh" && chmod 700 /root/install.sh && /root/install.sh
 ```
 
 ### 快捷唤出
@@ -49,7 +49,7 @@ vasma
 
 ```text
 ╭──────────────────────────────────────────────────────────────╮
-│  v2ray-agent (修改版) - v3.5.42-pr7         快捷命令: vasma  │
+│  v2ray-agent (修改版) - v3.5.42-pr8         快捷命令: vasma  │
 ╰──────────────────────────────────────────────────────────────╯
   运行核心 : Xray + sing-box [双核运行中]  |  Nginx: 运行中  |  证书: 剩余 85 天(有效)
   已装协议 : Reality+Vision(443) | Hysteria2(UDP:443) | VLESS+Vision(8443)

@@ -1316,7 +1316,7 @@ unInstallSingBox() {
             rm -f "${singBoxConfigPath}06_hysteria2_inbounds.json"
             echoContent green " ---> 删除sing-box hysteria2配置成功"
         fi
-        rm -f "${singBoxConfigPath}config.json"
+        rm -f /etc/v2ray-agent/sing-box/conf/config.json
     fi
 
     readInstallType
@@ -1326,8 +1326,7 @@ unInstallSingBox() {
         handleSingBox stop
         handleSingBox start
     else
-        handleSingBox stop
-        rm /etc/systemd/system/sing-box.service
+        removeCoreService sing-box || return 1
         rm -rf /etc/v2ray-agent/sing-box/*
         echoContent green " ---> sing-box 卸载完成"
     fi
@@ -1893,7 +1892,7 @@ installTools() {
                     echoContent green " ---> 安装nginx"
                     installNginxTools >/dev/null 2>&1 || return 1
                 else
-                    exit 0
+                    return 1
                 fi
             fi
         fi
@@ -1933,7 +1932,7 @@ installTools() {
                 echoContent red "  2.acme.sh脚本出现bug，可查看[https://github.com/acmesh-official/acme.sh] issues"
                 echoContent red "  3.如纯IPv6机器，请设置NAT64,可执行下方命令，如果添加下方命令还是不可用，请尝试更换其他NAT64"
                 echoContent skyBlue "  sed -i \"1i\\\nameserver 2a00:1098:2b::1\\\nnameserver 2a00:1098:2c::1\\\nnameserver 2a01:4f8:c2c:123f::1\\\nnameserver 2a01:4f9:c010:3f02::1\" /etc/resolv.conf"
-                exit 0
+                return 1
             fi
         fi
     fi
@@ -2969,7 +2968,7 @@ handleNginx() {
 installCronTLS() {
     if [[ -z "${btDomain}" ]]; then
         echoContent skyBlue "\n进度 $1/${totalProgress} : 添加定时维护证书"
-        crontab -l >/etc/v2ray-agent/backup_crontab.cron
+        crontab -l 2>/dev/null >/etc/v2ray-agent/backup_crontab.cron || true
         local historyCrontab
         historyCrontab=$(sed '/v2ray-agent/d;/acme.sh/d' /etc/v2ray-agent/backup_crontab.cron)
         echo "${historyCrontab}" >/etc/v2ray-agent/backup_crontab.cron
@@ -2981,12 +2980,12 @@ installCronTLS() {
 # 定时任务更新geo文件
 installCronUpdateGeo() {
     if [[ "${coreInstallType}" == "1" ]]; then
-        if crontab -l | grep -q "UpdateGeo"; then
+        if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
             echoContent red "\n ---> 已添加自动更新定时任务，请不要重复添加"
-            exit 0
+            return 0
         fi
         echoContent skyBlue "\n进度 1/1 : 添加定时更新geo文件"
-        crontab -l >/etc/v2ray-agent/backup_crontab.cron
+        crontab -l 2>/dev/null >/etc/v2ray-agent/backup_crontab.cron || true
         echo "35 1 * * * /bin/bash /etc/v2ray-agent/install.sh UpdateGeo >> /etc/v2ray-agent/crontab_tls.log 2>&1" >>/etc/v2ray-agent/backup_crontab.cron
         crontab /etc/v2ray-agent/backup_crontab.cron
         echoContent green "\n ---> 添加定时更新geo文件成功"
@@ -5340,24 +5339,27 @@ initSingBoxPort() {
             port=
         else
             echo "${port}"
+            return 0
         fi
     elif [[ -n "${port}" && -n "${lastInstallationConfig}" ]]; then
         echo "${port}"
+        return 0
     fi
-    if [[ -z "${port}" ]]; then
+    while :; do
         read -r -p '请输入自定义端口[需合法]，端口不可重复，[回车]随机端口:' port
         if [[ -z "${port}" ]]; then
             port=$((RANDOM % 50001 + 10000))
         fi
-        if ((port >= 1 && port <= 65535)); then
-            allowPort "${port}"
-            allowPort "${port}" "udp"
+        if [[ "${port}" =~ ^[0-9]{1,5}$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535)); then
+            port=$((10#${port}))
+            allowPort "${port}" >&2 || true
+            allowPort "${port}" "udp" >&2 || true
             echo "${port}"
+            return 0
         else
-            echoContent red " ---> 端口输入错误"
-            exit 0
+            echoContent red " ---> 端口输入错误（需为 1-65535 的数字）" >&2
         fi
-    fi
+    done
 }
 
 # 初始化Xray 配置文件
@@ -7382,15 +7384,12 @@ checkNginx302() {
     local domain302Status=
     domain302Status=$(curl -s "https://${currentHost}:${currentPort}")
     if echo "${domain302Status}" | grep -q "302"; then
-        #        local domain302Result=
-        #        domain302Result=$(curl -L -s "https://${currentHost}:${currentPort}")
-        #        if [[ -n "${domain302Result}" ]]; then
         echoContent green " ---> 302重定向设置完毕"
-        exit 0
-        #        fi
+        return 0
     fi
     echoContent red " ---> 302重定向设置失败，请仔细检查是否和示例相同"
     backupNginxConfig restoreBackup
+    return 1
 }
 
 # 备份恢复nginx文件
@@ -8518,7 +8517,7 @@ unInstall() {
     rm -rf "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" >/dev/null 2>&1
     rm -rf "${nginxConfigPath}00-server-names-hash.conf" >/dev/null 2>&1
 
-    unInstallSubscribe
+    unInstallSubscribe || return 1
 
     if [[ -n "${nginxStaticPath}" && "${nginxStaticPath}" != "/" && -d "${nginxStaticPath}" && -f "${nginxStaticPath}/check" ]]; then
         rm -rf "${nginxStaticPath}"
@@ -9173,14 +9172,10 @@ EOF
         fi
 
         if [[ ${realityStatus} == "7" ]]; then
-            local vlessVisionRealityInbounds
-            vlessVisionRealityInbounds=$(jq -r ".inbounds[0].streamSettings.realitySettings.show=${realityLogShow}" ${configPath}07_VLESS_vision_reality_inbounds.json)
-            echo "${vlessVisionRealityInbounds}" | jq . >${configPath}07_VLESS_vision_reality_inbounds.json
+            jqUpdateJsonFile "${configPath}07_VLESS_vision_reality_inbounds.json" --argjson show "${realityLogShow}" '.inbounds[1].streamSettings.realitySettings.show = $show' || return 1
         fi
         if [[ ${realityStatus} == "12" ]]; then
-            local vlessVisionRealityXHTTPInbounds
-            vlessVisionRealityXHTTPInbounds=$(jq -r ".inbounds[0].streamSettings.realitySettings.show=${realityLogShow}" ${configPath}12_VLESS_XHTTP_inbounds.json)
-            echo "${vlessVisionRealityXHTTPInbounds}" | jq . >${configPath}12_VLESS_XHTTP_inbounds.json
+            jqUpdateJsonFile "${configPath}12_VLESS_XHTTP_inbounds.json" --argjson show "${realityLogShow}" '.inbounds[0].streamSettings.realitySettings.show = $show' || return 1
         fi
         reloadCore
         checkLog 1
@@ -9450,9 +9445,7 @@ btTools() {
 
             unInstallRouting blackhole_out outboundTag bittorrent
 
-            routing=$(jq -r '.routing.rules += [{"type":"field","outboundTag":"blackhole_out","protocol":["bittorrent"]}]' ${configPath}09_routing.json)
-
-            echo "${routing}" | jq . >${configPath}09_routing.json
+            jqUpdateJsonFile "${configPath}09_routing.json" '.routing.rules += [{"type":"field","outboundTag":"blackhole_out","protocol":["bittorrent"]}]' || return 1
 
         else
             cat <<EOF >${configPath}09_routing.json
@@ -9788,7 +9781,7 @@ addXrayRouting() {
 
     if [[ -z "${tag}" || -z "${type}" || -z "${domain}" ]]; then
         echoContent red " ---> 参数错误"
-        exit 0
+        return 1
     fi
 
     local routingRule=
@@ -9828,18 +9821,15 @@ EOF
 
     unInstallRouting "${tag}" "${type}"
     if ! grep -q "gstatic.com" ${configPath}09_routing.json && [[ "${tag}" == "blackhole_out" ]]; then
-        local routing=
-        routing=$(jq -r ".routing.rules += [{\"type\": \"field\",\"domain\": [\"domain:gstatic.com\"],\"outboundTag\": \"allow_domain_direct_outbound\"}]" ${configPath}09_routing.json)
-        echo "${routing}" | jq . >${configPath}09_routing.json
+        jqUpdateJsonFile "${configPath}09_routing.json" '.routing.rules += [{"type":"field","domain":["domain:gstatic.com"],"outboundTag":"allow_domain_direct_outbound"}]' || return 1
         addXrayOutbound allow_domain_direct_outbound
     fi
 
     if [[ "${rulePosition}" == "top" ]]; then
-        routing=$(jq -r ".routing.rules = [${routingRule}] + .routing.rules" ${configPath}09_routing.json)
+        jqUpdateJsonFile "${configPath}09_routing.json" --argjson rule "${routingRule}" '.routing.rules = [$rule] + .routing.rules' || return 1
     else
-        routing=$(jq -r ".routing.rules += [${routingRule}]" ${configPath}09_routing.json)
+        jqUpdateJsonFile "${configPath}09_routing.json" --argjson rule "${routingRule}" '.routing.rules += [$rule]' || return 1
     fi
-    echo "${routing}" | jq . >${configPath}09_routing.json
 }
 
 # 添加 Xray IP 屏蔽路由规则
@@ -9852,7 +9842,7 @@ addXrayIPRouting() {
 
     if [[ -z "${tag}" || -z "${type}" || -z "${ipList}" ]]; then
         echoContent red " ---> 参数错误"
-        exit 0
+        return 1
     fi
 
     if [[ ! -f "${configPath}09_routing.json" ]]; then
@@ -9886,14 +9876,12 @@ EOF
         if echo "${routingRule}" | grep -q "${ipRuleValue}"; then
             echoContent yellow " ---> ${ipRuleValue}已存在，跳过"
         else
-            routingRule=$(echo "${routingRule}" | jq -r '.ip += ["'"${ipRuleValue}"'"]')
+            routingRule=$(echo "${routingRule}" | jq -r --arg ip "${ipRuleValue}" '.ip += [$ip]')
         fi
     done < <(echo "${ipList}" | tr ',' '\n')
 
     unInstallRouting "${tag}" "${type}"
-    local routing=
-    routing=$(jq -r ".routing.rules += [${routingRule}]" ${configPath}09_routing.json)
-    echo "${routing}" | jq . >${configPath}09_routing.json
+    jqUpdateJsonFile "${configPath}09_routing.json" --argjson rule "${routingRule}" '.routing.rules += [$rule]' || return 1
 }
 
 # 添加 sing-box IP 屏蔽路由规则
@@ -9981,24 +9969,20 @@ unInstallRouting() {
     local protocol=$3
 
     if [[ -f "${configPath}09_routing.json" ]]; then
-        local routing=
         if [[ -n "${protocol}" ]]; then
-            routing=$(jq -r "del(.routing.rules[] | select(.${type} == \"${tag}\" and (.protocol | index(\"${protocol}\"))))" ${configPath}09_routing.json)
-            echo "${routing}" | jq . >${configPath}09_routing.json
+            jqUpdateJsonFile "${configPath}09_routing.json" --arg type "${type}" --arg tag "${tag}" --arg proto "${protocol}" 'del(.routing.rules[] | select(.[$type] == $tag and (.protocol | index($proto))))' || return 1
         else
-            routing=$(jq -r "del(.routing.rules[] | select(.${type} == \"${tag}\" and (.protocol == null )))" ${configPath}09_routing.json)
-            echo "${routing}" | jq . >${configPath}09_routing.json
+            jqUpdateJsonFile "${configPath}09_routing.json" --arg type "${type}" --arg tag "${tag}" 'del(.routing.rules[] | select(.[$type] == $tag and (.protocol == null)))' || return 1
         fi
     fi
 }
 
 # 卸载嗅探
 unInstallSniffing() {
-    local inbound sniffing
+    local inbound
     while IFS= read -r -d '' inbound; do
         if grep -q "destOverride" "${inbound}"; then
-            sniffing=$(jq -r 'del(.inbounds[0].sniffing)' "${inbound}")
-            echo "${sniffing}" | jq . >"${inbound}"
+            jqUpdateJsonFile "${inbound}" 'del(.inbounds[0].sniffing)' || return 1
         fi
     done < <(find "${configPath}" -name "*inbounds.json*" -print0)
 }
@@ -10009,8 +9993,7 @@ installSniffing() {
     if [[ "${coreInstallType}" == "1" ]]; then
         if [[ -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
             if ! grep -q "destOverride" <"${configPath}02_VLESS_TCP_inbounds.json"; then
-                sniffing=$(jq -r '.inbounds[0].sniffing = {"enabled":true,"destOverride":["http","tls","quic"]}' "${configPath}02_VLESS_TCP_inbounds.json")
-                echo "${sniffing}" | jq . >"${configPath}02_VLESS_TCP_inbounds.json"
+                jqUpdateJsonFile "${configPath}02_VLESS_TCP_inbounds.json" '.inbounds[0].sniffing = {"enabled":true,"destOverride":["http","tls","quic"]}' || return 1
             fi
         fi
     fi
@@ -11309,7 +11292,25 @@ socks5OutboundNormalizeSingBox() {
     socks5OutboundOrder sing-box "$original" "$compiled" "$prefix" >"$work/sb-ordered.json" || return 1
     jq --slurpfile rules "$work/sb-ordered.json" --slurpfile m "$compiled" '
       .route.rules=$rules[0] |
-      if $m[0].default_tag!=null then .route.final=$m[0].default_tag else . end |
+      if $m[0].default_tag!=null then .route.final=$m[0].default_tag
+      elif (.route.final // "")=="" then
+        # A managed SOCKS5 outbound must not become the implicit default.
+        ($m[0].outbounds | map(.tag)) as $managed_tags |
+        if (.outbounds[0].tag as $tag | $managed_tags | index($tag))!=null then
+          ([.outbounds | to_entries[] |
+            select(.value.tag as $tag | ($managed_tags | index($tag))==null)] | first) as $original |
+          if $original!=null then
+            # sing-box uses the outbound index as its tag when no tag is set.
+            .route.final=(if ($original.value.tag // "")!="" then $original.value.tag else ($original.key | tostring) end)
+          else
+            # Replace the built-in direct fallback, which exists only with no default outbound.
+            ([.outbounds[]?.tag, .endpoints[]?.tag]) as $used_tags |
+            first(("direct", (range(1; ($used_tags|length)+1) | "socks5_fallback_direct_\(.)")) |
+              select(. as $tag | ($used_tags | index($tag))==null)) as $fallback |
+            .outbounds+=[{type:"direct",tag:$fallback}] | .route.final=$fallback
+          end
+        else . end
+      else . end |
       if .route.rule_set!=null then .route.rule_set|=unique_by(.tag) else . end' \
         "$config" >"$config.tmp" && mv -f "$config.tmp" "$config"
 }
@@ -11714,6 +11715,9 @@ socks5OutboundTransaction() (
     *) return 0 ;;
     esac
     echoContent green " ---> $(socks5OutboundText "$completedCN" "$completedEN")"
+    if [[ "$callback" == socks5OutboundEditNode && "${2:-false}" != true ]]; then
+        echoContent yellow "$(socks5OutboundText '请选择「3.添加规则」启用分流，此处选择的入站和账号会作为规则的默认选项。' 'Select 3.Add route to enable routing. Your inbound and user selections will be used by default.')"
+    fi
     echo
 )
 
@@ -12573,7 +12577,7 @@ setVMessWSRoutingOutbounds() {
         addXrayRouting VMess-out outboundTag "${domainList}"
         reloadCore
         echoContent green " ---> 添加分流成功"
-        exit 0
+        return 0
     fi
     echoContent red " ---> 地址不可为空"
     setVMessWSRoutingOutbounds
@@ -12743,7 +12747,7 @@ EOF
     else
         echoContent red " ---> SNI IP不可为空"
     fi
-    exit 0
+    return 0
 }
 
 # 添加xray dns 配置
@@ -13025,8 +13029,8 @@ runCustomSingBoxInstall() {
     removeCoreService xray || return 1
     installSingBox 4 || return 1
     installSingBoxService 5 || return 1
+    unInstallSubscribe || return 1
     initSingBoxConfig custom 6 || return 1
-    unInstallSubscribe
     cleanUp xrayDel || return 1
     installCronTLS 7
     handleSingBox stop
@@ -13053,8 +13057,8 @@ installXrayReality() {
     # 安装Xray
     installXray 2 false || return 1
     installXrayService 3 || return 1
+    unInstallSubscribe || return 1
     initXrayConfig custom 4 || return 1
-    unInstallSubscribe
 
     handleXray stop
     handleXray start
@@ -13075,8 +13079,8 @@ installSingBoxReality() {
 
     installSingBox 2 || return 1
     installSingBoxService 3 || return 1
+    unInstallSubscribe || return 1
     initSingBoxConfig custom 4 || return 1
-    unInstallSubscribe
     handleSingBox stop
     handleSingBox start
     # 生成账号
@@ -13218,6 +13222,7 @@ runCustomXrayInstall() {
     else
         nginxBlog 6
     fi
+    unInstallSubscribe || return 1
     if xraySelectionNeedsNginx "${selectCustomInstallType}"; then
         updateRedirectNginxConf
         handleNginx start || return 1
@@ -13232,7 +13237,6 @@ runCustomXrayInstall() {
     # A custom installation is a replacement: remove protocol fragments
     # that are not part of the new selection.
     initXrayConfig custom 9 || return 1
-    unInstallSubscribe
     if [[ "${goldenTrioPreset}" == "true" ]] || ! [[ "${selectCustomInstallType}" == *,6,* && -f /etc/v2ray-agent/sing-box/conf/config.json ]]; then
         cleanUp singBoxDel || return 1
     fi
@@ -13361,8 +13365,8 @@ xrayCoreInstall() {
     removeCoreService sing-box || return 1
     installXray 6 false || return 1
     installXrayService 7 || return 1
+    unInstallSubscribe || return 1
     initXrayConfig all 8 || return 1
-    unInstallSubscribe
     cleanUp singBoxDel || return 1
     installCronTLS 9
     if [[ -n "${btDomain}" ]]; then
@@ -13407,8 +13411,8 @@ singBoxInstall() {
     removeCoreService xray || return 1
     installSingBox 5 || return 1
     installSingBoxService 6 || return 1
+    unInstallSubscribe || return 1
     initSingBoxConfig all 7 || return 1
-    unInstallSubscribe
     cleanUp xrayDel || return 1
     installCronTLS 8
 
@@ -13658,7 +13662,7 @@ installSubscribe() {
                 installNginxTools || return 1
             else
                 echoContent red " ---> 放弃安装nginx\n"
-                exit 0
+                return 1
             fi
         fi
         echo
@@ -13671,7 +13675,7 @@ installSubscribe() {
         echo
         local httpSubscribeStatus=
 
-        if ! echo "${selectCustomInstallType}" | grep -qE ",0,|,1,|,2,|,3,|,4,|,5,|,6,|,9,|,10,|,11,|,13,|,14," && ! echo "${currentInstallProtocolType}" | grep -qE ",0,|,1,|,2,|,3,|,4,|,5,|,6,|,9,|,10,|,11,|,13,|14," && [[ -z "${domain}" ]]; then
+        if ! echo "${selectCustomInstallType}" | grep -qE ",0,|,1,|,2,|,3,|,4,|,5,|,6,|,9,|,10,|,11,|,13,|,14," && ! echo "${currentInstallProtocolType}" | grep -qE ",0,|,1,|,2,|,3,|,4,|,5,|,6,|,9,|,10,|,11,|,13,|,14," && [[ -z "${domain}" ]]; then
             httpSubscribeStatus=true
         fi
 
@@ -13683,7 +13687,7 @@ installSubscribe() {
             echo
             if [[ "${addNginxSubscribeStatus}" != "y" ]]; then
                 echoContent yellow " ---> 退出安装"
-                exit
+                return 1
             fi
         else
             local subscribeServerName=
@@ -13737,7 +13741,45 @@ EOF
 }
 # 卸载订阅
 unInstallSubscribe() {
-    rm -rf "${nginxConfigPath}subscribe.conf" >/dev/null 2>&1
+    local subscribeConfig="${nginxConfigPath}subscribe.conf"
+    local resetRealityTarget=false
+    # Read the listener before deleting it; cached subscription values may be stale.
+    if [[ -f "${subscribeConfig}" && -n "${realityServerName}" && -n "${realityDomainPort}" ]]; then
+        if awk -v host="${realityServerName}" -v targetPort="${realityDomainPort}" '
+            { sub(/#.*/, ""); config = config " " $0 }
+            END {
+                count = split(config, directives, ";")
+                for (d = 1; d <= count; d++) {
+                    n = split(directives[d], fields, /[[:space:]]+/)
+                    for (i = 1; i <= n; i++) {
+                        if (fields[i] == "server_name") {
+                            for (j = i + 1; j <= n; j++)
+                                if (fields[j] == host) matchedHost = 1
+                        }
+                        if (fields[i] == "listen") {
+                            port = fields[i + 1]
+                            sub(/^.*:/, "", port)
+                            for (j = i + 2; j <= n; j++)
+                                if (fields[j] == "ssl" && port == targetPort) matchedPort = 1
+                        }
+                    }
+                }
+                exit !(matchedHost && matchedPort)
+            }
+        ' "${subscribeConfig}"; then
+            resetRealityTarget=true
+        fi
+    fi
+    rm -f "${subscribeConfig}" || return 1
+    subscribePort=
+    subscribeDomain=
+    subscribeType=
+    if [[ "${resetRealityTarget}" == true ]]; then
+        realityServerName=
+        realityDomainPort=
+        realityDestDomain=
+    fi
+    return 0
 }
 
 # 添加订阅
@@ -14202,7 +14244,7 @@ subscribe() (
 
     readNginxSubscribe
     local publishedDir=/etc/v2ray-agent/subscribe
-    local subscribePublishPath publishBackup subscribeLocalStage localBackup saltPath saltBackup saltTemp status hadPublished=false hadSalt=false publishStarted=false localBackupCreated=false
+    local subscribePublishPath publishBackup subscribeLocalStage localBackup dirName saltPath saltBackup saltTemp status hadPublished=false hadSalt=false publishStarted=false localBackupCreated=false
     subscribePublishPath=$(mktemp -d "${publishedDir}.new.XXXXXX") || return 1
     publishBackup="${subscribePublishPath}.previous"
     subscribeLocalStage="${subscribePublishPath}.local"
@@ -14214,7 +14256,6 @@ subscribe() (
     trap '
     status=$?
     if [[ ${status} -ne 0 && "${localBackupCreated}" == true ]]; then
-        local dirName
         for dirName in default clashMeta sing-box; do
             if [[ -d "${localBackup}/${dirName}" ]]; then
                 rm -rf "/etc/v2ray-agent/subscribe_local/${dirName}"
@@ -14505,15 +14546,9 @@ switchAlpn() {
         siteCertMenu
         return 0
     elif [[ "${selectSwitchAlpnType}" == "1" && "${currentAlpn}" == "http/1.1" ]]; then
-
-        local frontingTypeJSON
-        frontingTypeJSON=$(jq -r ".inbounds[0].streamSettings.tlsSettings.alpn = [\"h2\",\"http/1.1\"]" "${configPath}${frontingType}.json") || return 1
-        echo "${frontingTypeJSON}" | jq . >"${configPath}${frontingType}.json" || return 1
-
+        jqUpdateJsonFile "${configPath}${frontingType}.json" '.inbounds[0].streamSettings.tlsSettings.alpn = ["h2","http/1.1"]' || return 1
     elif [[ "${selectSwitchAlpnType}" == "1" && "${currentAlpn}" == "h2" ]]; then
-        local frontingTypeJSON
-        frontingTypeJSON=$(jq -r ".inbounds[0].streamSettings.tlsSettings.alpn =[\"http/1.1\",\"h2\"]" "${configPath}${frontingType}.json") || return 1
-        echo "${frontingTypeJSON}" | jq . >"${configPath}${frontingType}.json" || return 1
+        jqUpdateJsonFile "${configPath}${frontingType}.json" '.inbounds[0].streamSettings.tlsSettings.alpn = ["http/1.1","h2"]' || return 1
     else
         echoContent red " ---> 选择错误，请输入 0-1"
         switchAlpn 1
@@ -15195,9 +15230,17 @@ manageReality() {
 # 安装reality scanner
 installRealityScanner() {
     if [[ ! -f "/etc/v2ray-agent/xray/reality_scan/RealiTLScanner-linux-64" ]]; then
-        version=$(curl -s https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1 | jq -r '.[]|.tag_name')
-        wget -c -q -P /etc/v2ray-agent/xray/reality_scan/ "https://github.com/XTLS/RealiTLScanner/releases/download/${version}/RealiTLScanner-linux-64"
-        chmod 655 /etc/v2ray-agent/xray/reality_scan/RealiTLScanner-linux-64
+        version=$(curl -fsSL https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1 | jq -r '.[0].tag_name // empty')
+        if [[ -z "${version}" ]]; then
+            echoContent red " ---> 获取 RealiTLScanner 最新版本失败"
+            return 1
+        fi
+        mkdir -p /etc/v2ray-agent/xray/reality_scan/
+        if ! wget -c -q -P /etc/v2ray-agent/xray/reality_scan/ "https://github.com/XTLS/RealiTLScanner/releases/download/${version}/RealiTLScanner-linux-64"; then
+            echoContent red " ---> RealiTLScanner 下载失败"
+            return 1
+        fi
+        chmod 755 /etc/v2ray-agent/xray/reality_scan/RealiTLScanner-linux-64
     fi
 }
 # reality scanner
@@ -15221,14 +15264,14 @@ realityScanner() {
     read -r -p "某些IDC不允许扫描操作，比如搬瓦工，其中风险请自行承担，是否继续？[y/n]:" scanStatus
 
     if [[ "${scanStatus}" != "y" ]]; then
-        exit 0
+        return 0
     fi
 
     publicIP=$(getPublicIP "${type}")
     echoContent yellow "IP:${publicIP}"
     if [[ -z "${publicIP}" ]]; then
         echoContent red " ---> 无法获取IP"
-        exit 0
+        return 1
     fi
 
     read -r -p "IP是否正确？[y/n]:" ipStatus
@@ -15548,7 +15591,7 @@ menu() {
     readSingBoxConfig >/dev/null 2>&1
 
     echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
-    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr7         快捷命令: vasma  │"
+    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr8         快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
