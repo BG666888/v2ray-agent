@@ -4961,6 +4961,7 @@ EOF
     {
       "protocol": "wireguard",
       "settings": {
+        "domainStrategy": "ForceIPv4",
         "secretKey": "${secretKeyWarpReg}",
         "address": [
           "${address}"
@@ -4991,6 +4992,7 @@ EOF
     {
       "protocol": "wireguard",
       "settings": {
+        "domainStrategy": "ForceIPv6",
         "secretKey": "${secretKeyWarpReg}",
         "address": [
           "${address}"
@@ -10075,7 +10077,7 @@ addWireGuardRoute() {
     # xray
     if [[ "${coreInstallType}" == "1" ]]; then
 
-        addXrayRouting "wireguard_out_${type}" "${tag}" "${domainList}"
+        addXrayRouting "wireguard_out_${type}" "${tag}" "${domainList}" "top"
         addXrayOutbound "wireguard_out_${type}"
     fi
     # sing-box
@@ -10180,6 +10182,7 @@ warpRoutingReg() {
     elif [[ "${warpStatus}" == "2" ]]; then
         echoContent yellow "# 注意事项"
         echoContent yellow "# 支持sing-box、Xray-core"
+        echoContent yellow "# 录入示例：google（匹配全套 geosite:google，含 googleapis.com）；google.com（仅匹配 *.google.com），多条用英文逗号分隔"
         echoContent yellow "# 使用教程：https://www.v2ray-agent.com/archives/1683226921000 \n"
 
         read -r -p "请按照上面示例录入域名 (留空取消):" domainList
@@ -15591,7 +15594,7 @@ menu() {
     readSingBoxConfig >/dev/null 2>&1
 
     echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
-    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr8         快捷命令: vasma  │"
+    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr9         快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
