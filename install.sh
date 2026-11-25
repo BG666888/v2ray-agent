@@ -4784,11 +4784,19 @@ addSingBoxRouteRule() {
         ruleActionBlock="\"action\": \"route\", \"outbound\": \"${outboundTag}\""
     fi
 
+    local wgResolveRule=""
+    if [[ "${outboundTag}" == "wireguard_endpoints_IPv4" ]]; then
+        wgResolveRule="{\"rule_set\":${ruleSetTag},\"domain_regex\":${domainRules},\"action\":\"resolve\",\"strategy\":\"ipv4_only\"},"
+    elif [[ "${outboundTag}" == "wireguard_endpoints_IPv6" ]]; then
+        wgResolveRule="{\"rule_set\":${ruleSetTag},\"domain_regex\":${domainRules},\"action\":\"resolve\",\"strategy\":\"ipv6_only\"},"
+    fi
+
     if [[ -n "${singBoxConfigPath}" ]]; then
         cat <<EOF >"${singBoxConfigPath}${routingName}.json"
 {
   "route": {
     "rules": [
+      ${wgResolveRule}
       {
         "rule_set":${ruleSetTag},
         "domain_regex":${domainRules},
@@ -4807,10 +4815,8 @@ EOF
 # 移除sing-box route rule
 removeSingBoxRouteRule() {
     local outboundTag=$1
-    local delRules
     if [[ -f "${singBoxConfigPath}${outboundTag}_route.json" ]]; then
-        delRules=$(jq -r 'del(.route.rules[]|select((.outbound=="'"${outboundTag}"'") or (.action=="reject" and ("'"${outboundTag}"'" | test("block")))))' "${singBoxConfigPath}${outboundTag}_route.json")
-        echo "${delRules}" >"${singBoxConfigPath}${outboundTag}_route.json"
+        jqUpdateJsonFile "${singBoxConfigPath}${outboundTag}_route.json" --arg tag "${outboundTag}" 'del(.route.rules[] | select((.outbound == $tag) or (.action == "reject" and ($tag | test("block"))) or (.action == "resolve" and ($tag | startswith("wireguard_endpoints_")))))' || return 1
     fi
 }
 
@@ -4960,8 +4966,8 @@ EOF
   "outbounds": [
     {
       "protocol": "wireguard",
+      "targetStrategy": "ForceIPv4",
       "settings": {
-        "domainStrategy": "ForceIPv4",
         "secretKey": "${secretKeyWarpReg}",
         "address": [
           "${address}"
@@ -4991,8 +4997,8 @@ EOF
   "outbounds": [
     {
       "protocol": "wireguard",
+      "targetStrategy": "ForceIPv6",
       "settings": {
-        "domainStrategy": "ForceIPv6",
         "secretKey": "${secretKeyWarpReg}",
         "address": [
           "${address}"
@@ -5076,8 +5082,12 @@ removeSingBoxConfig() {
 # 初始化wireguard出站信息
 addSingBoxWireGuardEndpoints() {
     local type=$1
+    local wgStrategy="ipv4_only"
+    if [[ "${type}" == "IPv6" ]]; then
+        wgStrategy="ipv6_only"
+    fi
 
-    readConfigWarpReg
+    readConfigWarpReg || return 1
 
     cat <<EOF >"${singBoxConfigPath}wireguard_endpoints_${type}.json"
 {
@@ -5089,6 +5099,10 @@ addSingBoxWireGuardEndpoints() {
                 "${address}"
             ],
             "private_key": "${secretKeyWarpReg}",
+            "domain_resolver": {
+                "server": "local",
+                "strategy": "${wgStrategy}"
+            },
             "peers": [
                 {
                   "address": "162.159.192.1",
@@ -9296,7 +9310,7 @@ ipv6Routing() {
             return 0
         fi
         if [[ "${coreInstallType}" == "1" ]]; then
-            addXrayRouting IPv6_out outboundTag "${domainList}"
+            addXrayRouting IPv6_out outboundTag "${domainList}" "top"
             addXrayOutbound IPv6_out
         fi
 
@@ -9812,11 +9826,11 @@ EOF
     fi
 
     while read -r line; do
-        if echo "${routingRule}" | grep -q "${line}"; then
+        local matchedRuleValue
+        matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/v2ray-agent/xray")
+        if echo "${routingRule}" | jq -e --arg rule "${matchedRuleValue}" '(.domain // []) | index($rule) != null' >/dev/null; then
             echoContent yellow " ---> ${line}已存在，跳过"
         else
-            local matchedRuleValue
-            matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/v2ray-agent/xray")
             routingRule=$(echo "${routingRule}" | jq -r --arg rule "${matchedRuleValue}" '.domain += [$rule]')
         fi
     done < <(echo "${domain}" | tr ',' '\n')
@@ -9875,7 +9889,7 @@ EOF
             ipRuleValue="geoip:cn"
         fi
 
-        if echo "${routingRule}" | grep -q "${ipRuleValue}"; then
+        if echo "${routingRule}" | jq -e --arg ip "${ipRuleValue}" '(.ip // []) | index($ip) != null' >/dev/null; then
             echoContent yellow " ---> ${ipRuleValue}已存在，跳过"
         else
             routingRule=$(echo "${routingRule}" | jq -r --arg ip "${ipRuleValue}" '.ip += [$ip]')
@@ -10003,8 +10017,15 @@ installSniffing() {
 
 # 读取第三方warp配置
 readConfigWarpReg() {
-    if [[ ! -f "/etc/v2ray-agent/warp/config" ]]; then
-        /etc/v2ray-agent/warp/warp-reg >/etc/v2ray-agent/warp/config
+    if [[ ! -s "/etc/v2ray-agent/warp/config" ]]; then
+        local tmpConfig
+        tmpConfig=$(mktemp /etc/v2ray-agent/warp/config.XXXXXX) || return 1
+        if /etc/v2ray-agent/warp/warp-reg >"${tmpConfig}" && grep -q private_key "${tmpConfig}"; then
+            mv -f "${tmpConfig}" /etc/v2ray-agent/warp/config || { rm -f "${tmpConfig}"; return 1; }
+        else
+            rm -f "${tmpConfig}"
+            return 1
+        fi
     fi
 
     secretKeyWarpReg=$(grep <"/etc/v2ray-agent/warp/config" private_key | awk '{print $2}')
@@ -10028,12 +10049,12 @@ installWarpReg() {
 
         if [[ "${installWarpRegStatus}" == "y" ]]; then
 
-            curl -sLo /etc/v2ray-agent/warp/warp-reg "https://github.com/badafans/warp-reg/releases/download/v1.0/${warpRegCoreCPUVendor}"
-            chmod 655 /etc/v2ray-agent/warp/warp-reg
+            curl -fsSLo /etc/v2ray-agent/warp/warp-reg "https://github.com/badafans/warp-reg/releases/download/v1.0/${warpRegCoreCPUVendor}" || { rm -f /etc/v2ray-agent/warp/warp-reg; return 1; }
+            chmod 755 /etc/v2ray-agent/warp/warp-reg
 
         else
             echoContent yellow " ---> 放弃安装"
-            exit 0
+            return 1
         fi
     fi
 }
@@ -10161,8 +10182,16 @@ warpRoutingReg() {
         warpRoutingReg "$1" "${type}"
         return 0
     fi
-    installWarpReg
-    readConfigWarpReg
+    installWarpReg || {
+        routingToolsMenu 1
+        return 0
+    }
+    readConfigWarpReg || {
+        echoContent red " ---> WARP 配置读取或注册失败，请检查网络后重试"
+        read -r -p "按回车键返回智能分流菜单..." _
+        routingToolsMenu 1
+        return 0
+    }
     local address=
     if [[ ${type} == "IPv4" ]]; then
         address="172.16.0.2/32"
@@ -10202,7 +10231,12 @@ warpRoutingReg() {
         read -r -p "是否确认设置？[y/n]:" warpOutStatus
 
         if [[ "${warpOutStatus}" == "y" ]]; then
-            readConfigWarpReg
+            readConfigWarpReg || {
+                echoContent red " ---> WARP 配置读取或注册失败，请检查网络后重试"
+                read -r -p "按回车键返回智能分流菜单..." _
+                routingToolsMenu 1
+                return 0
+            }
             if [[ "${coreInstallType}" == "1" ]]; then
                 addXrayOutbound "wireguard_out_${type}"
                 if [[ "${type}" == "IPv4" ]]; then
@@ -15594,7 +15628,7 @@ menu() {
     readSingBoxConfig >/dev/null 2>&1
 
     echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
-    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr9         快捷命令: vasma  │"
+    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr10        快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
