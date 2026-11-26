@@ -3199,6 +3199,7 @@ installSingBox() {
         fi
 
         echoContent green " ---> 目标类型:${targetTypeStr}，最新版本:${version}"
+        [[ -n "${version}" ]] || { echoContent red " ---> 获取 sing-box 目标版本失败"; return 1; }
 
         installCoreRelease sing-box "${version}" || return 1
         migrateSingBoxConfigs
@@ -3215,7 +3216,7 @@ installSingBox() {
 
         echoContent green " ---> 目标类型:${targetTypeStr}，最新版本:${version}"
 
-        if [[ "${2:-}" == "force" || "${3:-}" == "force" ]]; then
+        if [[ "${3:-}" == "force" ]]; then
             [[ -n "${version}" ]] || { echoContent red " ---> 获取 sing-box 目标版本失败"; return 1; }
             installCoreRelease sing-box "${version}" || return 1
             migrateSingBoxConfigs
@@ -5945,7 +5946,7 @@ EOF
     if [[ -z "$3" ]]; then
         local _keepOut
         for _keepOut in IPv4_out IPv6_out socks5_outbound wireguard_out_IPv6 wireguard_out_IPv4 wireguard_out_IPv4_route wireguard_out_IPv6_route wireguard_outbound; do
-            if ! grep -q "\"outboundTag\": *\"${_keepOut}\"" /etc/v2ray-agent/xray/conf/09_routing.json 2>/dev/null; then
+            if ! grep -q "\"outboundTag\": *\"${_keepOut}\"" /etc/v2ray-agent/xray/conf/09_routing.json /etc/v2ray-agent/xray/conf/zz_socks5_routes.json 2>/dev/null; then
                 removeXrayOutbound "${_keepOut}"
             fi
         done
@@ -8780,12 +8781,12 @@ customUserEmail() {
 rollbackAddUserConfigs() {
     local backupDir=$1
     local rc=0
-    if [[ -d "${backupDir}/primary" ]]; then
+    if [[ -d "${backupDir}/primary" ]] && compgen -G "${backupDir}/primary/*.json" >/dev/null; then
         if ! cp -pf "${backupDir}/primary/"*.json "${configPath}" 2>/dev/null; then
             rc=1
         fi
     fi
-    if [[ -d "${backupDir}/singbox" && -n "${singBoxConfigPath}" ]]; then
+    if [[ -d "${backupDir}/singbox" && -n "${singBoxConfigPath}" ]] && compgen -G "${backupDir}/singbox/*.json" >/dev/null; then
         if ! cp -pf "${backupDir}/singbox/"*.json "${singBoxConfigPath}" 2>/dev/null; then
             rc=1
         fi
@@ -9454,8 +9455,8 @@ ipv6Routing() {
 
         echoContent red "=============================================================="
         echoContent yellow "# 注意事项\n"
-        echoContent yellow "1.会删除所有设置的分流规则"
-        echoContent yellow "2.会删除IPv6之外的所有出站规则\n"
+        echoContent yellow "1.全局激活期间会优先于已有分流与黑名单规则（原规则保留，取消全局后自动恢复）"
+        echoContent yellow "2.如仅需部分域名走 IPv6，请选择菜单 2 添加域名分流\n"
         read -r -p "是否确认设置？[y/n]:" IPv6OutStatus
 
         if [[ "${IPv6OutStatus}" == "y" ]]; then
@@ -9480,22 +9481,23 @@ EOF
                 ensureXrayBaseRoutingRules "${configPath}09_routing.json" || return 1
             fi
             if [[ -n "${singBoxConfigPath}" ]]; then
-
-                removeSingBoxConfig IPv4_out
-
-                removeSingBoxConfig wireguard_endpoints_IPv4_route
-                removeSingBoxConfig wireguard_endpoints_IPv6_route
-                removeSingBoxConfig wireguard_endpoints_IPv4
-                removeSingBoxConfig wireguard_endpoints_IPv6
-
-                removeSingBoxConfig socks5_02_inbound_route
-
-                removeSingBoxConfig IPv6_route
-
-                removeSingBoxConfig 01_direct_outbound
-
                 addSingBoxOutbound IPv6_out
-
+                cat <<EOF >"${singBoxConfigPath}00_0_ipv6_global_route.json"
+{
+  "route": {
+    "rules": [
+      {
+        "network": [
+          "tcp",
+          "udp"
+        ],
+        "action": "route",
+        "outbound": "IPv6_out"
+      }
+    ]
+  }
+}
+EOF
             fi
 
             echoContent green " ---> IPv6全局出站设置完毕"
@@ -9516,6 +9518,7 @@ EOF
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
+            removeSingBoxConfig "00_0_ipv6_global_route"
             removeSingBoxConfig IPv6_out
             removeSingBoxConfig "IPv6_route"
             addSingBoxOutbound "01_direct_outbound"
@@ -9552,7 +9555,10 @@ showIPv6Routing() {
 
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
-        if [[ -f "${singBoxConfigPath}IPv6_route.json" ]]; then
+        if [[ -f "${singBoxConfigPath}00_0_ipv6_global_route.json" ]]; then
+            echoContent yellow "sing-box"
+            echoContent green " ---> 已设置IPv6全局分流"
+        elif [[ -f "${singBoxConfigPath}IPv6_route.json" ]]; then
             echoContent yellow "sing-box"
             jq -r -c '.route.rules[]|select (.outbound=="IPv6_out")' "${singBoxConfigPath}IPv6_route.json" | jq -r
         elif [[ ! -f "${singBoxConfigPath}IPv6_route.json" && -f "${singBoxConfigPath}IPv6_out.json" ]]; then
@@ -15879,7 +15885,7 @@ menu() {
     readSingBoxConfig >/dev/null 2>&1
 
     echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
-    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr12        快捷命令: vasma  │"
+    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr13        快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
