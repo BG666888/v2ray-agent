@@ -9487,10 +9487,10 @@ EOF
   "route": {
     "rules": [
       {
-        "network": [
-          "tcp",
-          "udp"
+        "inbound": [
+          "socks5_inbound"
         ],
+        "invert": true,
         "action": "route",
         "outbound": "IPv6_out"
       }
