@@ -676,7 +676,14 @@ readNginxSubscribe() {
         if (port ~ /^[0-9]+$/ && !seen[port]++) {
             order[++cnt] = port
         }
-    }} END { if (cnt > 0) print order[1] }' "${subscribeConfig}")
+    }} END {
+        if (cnt > 1) {
+            printf "\033[31m ---> [警告] 订阅 Nginx 配置存在不一致的 listen 端口: " > "/dev/stderr"
+            for (j=1; j<=cnt; j++) printf "%s%s", (j>1?", ":""), order[j] > "/dev/stderr"
+            printf "，建议通过端口管理重新同步\033[0m\n" > "/dev/stderr"
+        }
+        if (cnt > 0) print order[1]
+    }' "${subscribeConfig}")
     subscribeDomain=$(awk 'BEGIN { RS=";" } { for (i=1; i<NF; i++) if ($i == "server_name") { print $(i+1); exit }}' "${subscribeConfig}")
     if [[ -n "${currentHost}" && -n "${subscribeDomain}" && "${subscribeDomain}" != "${currentHost}" ]]; then
         subscribePort=
@@ -2089,10 +2096,14 @@ checkDNSIP() {
 restorePortCheckCores() {
     local xrayWasRunning=$1 sbWasRunning=$2
     if [[ "${sbWasRunning}" == "true" ]]; then
-        handleSingBox start >/dev/null 2>&1 || true
+        if ! handleSingBox start >/dev/null 2>&1; then
+            echoContent red " ---> [警告] 恢复启动 sing-box 核心失败，请手动检查服务状态"
+        fi
     fi
     if [[ "${xrayWasRunning}" == "true" ]]; then
-        handleXray start >/dev/null 2>&1 || true
+        if ! handleXray start >/dev/null 2>&1; then
+            echoContent red " ---> [警告] 恢复启动 Xray 核心失败，请手动检查服务状态"
+        fi
     fi
 }
 
@@ -2176,7 +2187,10 @@ EOF
             restorePortCheckCores "${xrayWasRunning}" "${sbWasRunning}"
             return 1
         fi
-        checkIP "${localIP}"
+        if ! checkIP "${localIP}"; then
+            restorePortCheckCores "${xrayWasRunning}" "${sbWasRunning}"
+            return 1
+        fi
     fi
 }
 
@@ -2474,13 +2488,13 @@ checkIP() {
             echoContent yellow " ---> 检测返回值异常，建议手动卸载nginx后重新执行脚本"
             echoContent red " ---> 异常结果：${localIP}"
         fi
-        exit 0
+        return 1
     else
         if echo "${localIP}" | awk -F "[,]" '{print $2}' | grep -q "." || echo "${localIP}" | awk -F "[,]" '{print $2}' | grep -q ":"; then
             echoContent red "\n ---> 检测到多个ip，请确认是否关闭cloudflare的云朵"
             echoContent yellow " ---> 关闭云朵后等待三分钟后重试"
             echoContent yellow " ---> 检测到的ip如下:[${localIP}]"
-            exit 0
+            return 1
         fi
         echoContent green " ---> 检查当前域名IP正确"
     fi
@@ -3201,7 +3215,8 @@ installSingBox() {
 
         echoContent green " ---> 目标类型:${targetTypeStr}，最新版本:${version}"
 
-        if [[ "${3:-}" == "force" ]]; then
+        if [[ "${2:-}" == "force" || "${3:-}" == "force" ]]; then
+            [[ -n "${version}" ]] || { echoContent red " ---> 获取 sing-box 目标版本失败"; return 1; }
             installCoreRelease sing-box "${version}" || return 1
             migrateSingBoxConfigs
         elif [[ -z "${lastInstallationConfig}" ]]; then
@@ -3210,6 +3225,7 @@ installSingBox() {
             else
                 read -r -p "是否更新、升级？[y/n]:" reInstallSingBoxStatus
                 if [[ "${reInstallSingBoxStatus}" == "y" ]]; then
+                    [[ -n "${version}" ]] || { echoContent red " ---> 获取 sing-box 目标版本失败"; return 1; }
                     installCoreRelease sing-box "${version}" || return 1
                     migrateSingBoxConfigs
                 fi
@@ -4796,10 +4812,10 @@ addSingBoxRouteRule() {
         read -r -p "读取到上次的配置，是否保留 ？[y/n]:" historyRouteStatus
         if [[ "${historyRouteStatus}" == "y" ]]; then
             domainList="${domainList},$(jq -rc '.route.rules[0].rule_set[]?' "${singBoxConfigPath}${routingName}.json" 2>/dev/null | sed -E "s/_${routingName}\$//" | awk -F "[_]" '{print $1}' | paste -sd ',')"
-            domainList="${domainList},$(jq -rc '.route.rules[0].domain_regex[]?' "${singBoxConfigPath}${routingName}.json" 2>/dev/null | sed -E 's/^\.\*//; s/\.\*$//; s/^\^\(\[a-zA-Z0-9_-\]\+\\\.\)\*//; s/\\//g' | paste -sd ',')"
+            domainList="${domainList},$(jq -rc '.route.rules[0].domain_regex[]?' "${singBoxConfigPath}${routingName}.json" 2>/dev/null | sed -E 's/^\.\*//; s/\.\*$//; s/^\^\(\[a-zA-Z0-9_-\]\+\\\.\)\*//; s/\\//g; s/\.+$//' | paste -sd ',')"
         fi
     fi
-    domainList=$(echo "${domainList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | awk '!seen[$0]++' | paste -sd ',')
+    domainList=$(echo "${domainList}" | tr ',' '\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/\.+$//' | grep -v '^$' | awk '!seen[$0]++' | paste -sd ',')
     local rules=
     rules=$(initSingBoxRules "${domainList}" "${routingName}")
     # domain精确匹配规则
@@ -4846,11 +4862,16 @@ addSingBoxRouteRule() {
   }
 }
 EOF
-        jq 'if .route.rule_set == [] then del(.route.rule_set) else . end' "${singBoxConfigPath}${routingName}.json" >"${singBoxConfigPath}${routingName}_tmp.json" && mv "${singBoxConfigPath}${routingName}_tmp.json" "${singBoxConfigPath}${routingName}.json"
-        if [[ -n "${domainList}" ]]; then
-            echo "${domainList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | awk '!seen[$0]++' >"${singBoxConfigPath}${routingName}.domains"
+        if jq 'if .route.rule_set == [] then del(.route.rule_set) else . end' "${singBoxConfigPath}${routingName}.json" >"${singBoxConfigPath}${routingName}_tmp.json" &&
+            mv "${singBoxConfigPath}${routingName}_tmp.json" "${singBoxConfigPath}${routingName}.json"; then
+            if [[ -n "${domainList}" ]]; then
+                echo "${domainList}" | tr ',' '\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/\.+$//' | grep -v '^$' | awk '!seen[$0]++' >"${singBoxConfigPath}${routingName}.domains"
+            else
+                rm -f "${singBoxConfigPath}${routingName}.domains"
+            fi
         else
-            rm -f "${singBoxConfigPath}${routingName}.domains"
+            rm -f "${singBoxConfigPath}${routingName}_tmp.json"
+            return 1
         fi
     fi
 
@@ -5028,7 +5049,8 @@ EOF
           }
         ],
         "reserved": ${reservedWarpReg},
-        "mtu": 1280
+        "mtu": 1280,
+        "noKernelTun": true
       },
       "tag": "${tag}"
     }
@@ -5059,7 +5081,8 @@ EOF
           }
         ],
         "reserved": ${reservedWarpReg},
-        "mtu": 1280
+        "mtu": 1280,
+        "noKernelTun": true
       },
       "tag": "${tag}"
     }
@@ -5523,7 +5546,8 @@ EOF
 EOF
     fi
     # routing
-    cat <<EOF >/etc/v2ray-agent/xray/conf/09_routing.json
+    if [[ ! -f "/etc/v2ray-agent/xray/conf/09_routing.json" ]]; then
+        cat <<EOF >/etc/v2ray-agent/xray/conf/09_routing.json
 {
   "routing": {
     "rules": [
@@ -5540,6 +5564,7 @@ EOF
   }
 }
 EOF
+    fi
     # VLESS_TCP_TLS_Vision
     # 回落nginx
     local fallbacksList='{"dest":31300,"xver":1},{"alpn":"h2","dest":31302,"xver":1}'
@@ -5918,19 +5943,16 @@ EOF
     fi
     installSniffing
     if [[ -z "$3" ]]; then
-        removeXrayOutbound wireguard_out_IPv4_route
-        removeXrayOutbound wireguard_out_IPv6_route
-        removeXrayOutbound wireguard_outbound
-        removeXrayOutbound IPv4_out
-        removeXrayOutbound IPv6_out
-        removeXrayOutbound socks5_outbound
-        removeXrayOutbound blackhole_out
-        removeXrayOutbound wireguard_out_IPv6
-        removeXrayOutbound wireguard_out_IPv4
+        local _keepOut
+        for _keepOut in IPv4_out IPv6_out socks5_outbound wireguard_out_IPv6 wireguard_out_IPv4 wireguard_out_IPv4_route wireguard_out_IPv6_route wireguard_outbound; do
+            if ! grep -q "\"outboundTag\": *\"${_keepOut}\"" /etc/v2ray-agent/xray/conf/09_routing.json 2>/dev/null; then
+                removeXrayOutbound "${_keepOut}"
+            fi
+        done
         addXrayOutbound z_direct_outbound
         addXrayOutbound blackhole_out
     fi
-    ensureXrayBaseRoutingRules /etc/v2ray-agent/xray/conf/09_routing.json
+    ensureXrayBaseRoutingRules /etc/v2ray-agent/xray/conf/09_routing.json || return 1
 }
 
 # 初始化TCP Brutal
@@ -8237,9 +8259,13 @@ portManagement() {
     # 修改配置
     if [[ "${targetCore}" == "nginx" ]]; then
         if ! sed -i -E "s/(listen[[:space:]]+(\[::\]:)?)${oldPort}([^0-9]|$)/\1${newPort}\3/g" "${targetFile}" ||
-            ! grep -Eq "listen[[:space:]]+(\[::\]:)?${newPort}([^0-9]|$)" "${targetFile}"; then
-            rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}" || true
-            echoContent red " ---> Nginx 端口配置写入失败，已尝试回滚"
+            ! grep -Eq "listen[[:space:]]+(\[::\]:)?${newPort}([^0-9]|$)" "${targetFile}" ||
+            grep -Eq "listen[[:space:]]+(\[::\]:)?${oldPort}([^0-9]|$)" "${targetFile}"; then
+            if rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}"; then
+                echoContent red " ---> Nginx 端口配置写入失败，已自动回滚端口至 [${oldPort}]"
+            else
+                echoContent red " ---> Nginx 端口配置写入失败且自动回滚异常，请检查 ${targetFile} 及备份 ${targetBackup}"
+            fi
             return 1
         fi
         local nginxReloadOk=true
@@ -8261,21 +8287,30 @@ portManagement() {
     elif [[ "${targetCore}" == "xray" ]]; then
         if jq -e '.inbounds[1].protocol == "dokodemo-door"' "${targetFile}" >/dev/null 2>&1; then
             if ! jqUpdateJsonFile "${targetFile}" --argjson p "${newPort}" '.inbounds[1].port = $p'; then
-                rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}" || true
-                echoContent red " ---> Xray 端口配置更新失败，已回滚"
+                if rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}"; then
+                    echoContent red " ---> Xray 端口配置更新失败，已自动回滚端口至 [${oldPort}]"
+                else
+                    echoContent red " ---> Xray 端口配置更新失败且自动回滚异常，请检查 ${targetFile} 及备份 ${targetBackup}"
+                fi
                 return 1
             fi
         else
             if ! jqUpdateJsonFile "${targetFile}" --argjson p "${newPort}" '.inbounds[0].port = $p'; then
-                rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}" || true
-                echoContent red " ---> Xray 端口配置更新失败，已回滚"
+                if rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}"; then
+                    echoContent red " ---> Xray 端口配置更新失败，已自动回滚端口至 [${oldPort}]"
+                else
+                    echoContent red " ---> Xray 端口配置更新失败且自动回滚异常，请检查 ${targetFile} 及备份 ${targetBackup}"
+                fi
                 return 1
             fi
         fi
     elif [[ "${targetCore}" == "sing-box" ]]; then
         if ! jqUpdateJsonFile "${targetFile}" --argjson p "${newPort}" '.inbounds[0].listen_port = $p'; then
-            rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}" || true
-            echoContent red " ---> sing-box 端口配置更新失败，已回滚"
+            if rollbackPortChange "${targetFile}" "${targetBackup}" "${targetCore}" "${oldPort}" "${newPort}"; then
+                echoContent red " ---> sing-box 端口配置更新失败，已自动回滚端口至 [${oldPort}]"
+            else
+                echoContent red " ---> sing-box 端口配置更新失败且自动回滚异常，请检查 ${targetFile} 及备份 ${targetBackup}"
+            fi
             return 1
         fi
     fi
@@ -8741,16 +8776,26 @@ customUserEmail() {
     done
 }
 
-# addUser 事务回滚辅助：恢复备份配置并清理临时目录
+# addUser 事务回滚辅助：恢复备份配置并在全部成功后再清理临时目录
 rollbackAddUserConfigs() {
     local backupDir=$1
+    local rc=0
     if [[ -d "${backupDir}/primary" ]]; then
-        cp -pf "${backupDir}/primary/"*.json "${configPath}" 2>/dev/null || true
+        if ! cp -pf "${backupDir}/primary/"*.json "${configPath}" 2>/dev/null; then
+            rc=1
+        fi
     fi
     if [[ -d "${backupDir}/singbox" && -n "${singBoxConfigPath}" ]]; then
-        cp -pf "${backupDir}/singbox/"*.json "${singBoxConfigPath}" 2>/dev/null || true
+        if ! cp -pf "${backupDir}/singbox/"*.json "${singBoxConfigPath}" 2>/dev/null; then
+            rc=1
+        fi
+    fi
+    if ((rc != 0)); then
+        echoContent red " ---> [严重] 无法从临时备份 ${backupDir} 完整恢复配置，已保留备份目录请手动检查"
+        return 1
     fi
     rm -rf "${backupDir}"
+    return 0
 }
 
 # 添加用户
@@ -9416,30 +9461,23 @@ ipv6Routing() {
         if [[ "${IPv6OutStatus}" == "y" ]]; then
             if [[ "${coreInstallType}" == "1" ]]; then
                 addXrayOutbound IPv6_out
-                removeXrayOutbound IPv4_out
-                removeXrayOutbound z_direct_outbound
-                removeXrayOutbound blackhole_out
-                removeXrayOutbound wireguard_out_IPv4
-                removeXrayOutbound wireguard_out_IPv6
-                removeXrayOutbound socks5_outbound
-                removeXrayOutbound allow_domain_direct_outbound
-                removeXrayOutbound VMess-out
-
-                cat <<EOF >"${configPath}09_routing.json"
+                if [[ ! -f "${configPath}09_routing.json" ]]; then
+                    cat <<EOF >"${configPath}09_routing.json"
 {
   "routing": {
     "type": "field",
-    "rules": [
-      {
-        "type": "field",
-        "network": "tcp,udp",
-        "outboundTag": "IPv6_out"
-      }
-    ]
+    "rules": []
   }
 }
 EOF
-                ensureXrayBaseRoutingRules "${configPath}09_routing.json"
+                fi
+                jqUpdateJsonFile "${configPath}09_routing.json" '
+                  .routing.type = (.routing.type // "field") |
+                  .routing.rules = (
+                    [{"type":"field","network":"tcp,udp","outboundTag":"IPv6_out"}] +
+                    [ (.routing.rules // [])[] | select(((.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null) and (.port == null) and (.source == null) and (.user == null) and (.attrs == null)) | not) ]
+                  )' || return 1
+                ensureXrayBaseRoutingRules "${configPath}09_routing.json" || return 1
             fi
             if [[ -n "${singBoxConfigPath}" ]]; then
 
@@ -9474,7 +9512,7 @@ EOF
 
             removeXrayOutbound IPv6_out
             addXrayOutbound "z_direct_outbound"
-            ensureXrayBaseRoutingRules "${configPath}09_routing.json"
+            ensureXrayBaseRoutingRules "${configPath}09_routing.json" || return 1
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
@@ -9565,6 +9603,7 @@ btTools() {
             unInstallRouting blackhole_out outboundTag bittorrent
 
             jqUpdateJsonFile "${configPath}09_routing.json" '.routing.rules += [{"type":"field","outboundTag":"blackhole_out","protocol":["bittorrent"]}]' || return 1
+            ensureXrayBaseRoutingRules "${configPath}09_routing.json" || return 1
 
         else
             cat <<EOF >${configPath}09_routing.json
@@ -9581,6 +9620,7 @@ btTools() {
   }
 }
 EOF
+            ensureXrayBaseRoutingRules "${configPath}09_routing.json" || return 1
         fi
 
         installSniffing
@@ -9916,11 +9956,13 @@ EOF
         hasXhttpTls=true
     fi
 
-    local catchallTag="z_direct_outbound"
-    if jq -e '.routing.rules[]? | select(.outboundTag == "IPv6_out" and (.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null))' "${routingFile}" >/dev/null 2>&1; then
+    local catchallTag="z_direct_outbound" isGlobalOverride=false
+    if jq -e '.routing.rules[]? | select(.outboundTag == "IPv6_out" and (.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null) and (.port == null) and (.source == null) and (.user == null) and (.attrs == null))' "${routingFile}" >/dev/null 2>&1; then
         catchallTag="IPv6_out"
-    elif jq -e '.routing.rules[]? | select((.outboundTag // "" | test("^wireguard_out_IPv[46]$")) and (.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null))' "${routingFile}" >/dev/null 2>&1; then
-        catchallTag=$(jq -r '.routing.rules[]? | select((.outboundTag // "" | test("^wireguard_out_IPv[46]$")) and (.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null)) | .outboundTag' "${routingFile}" 2>/dev/null | head -1)
+        isGlobalOverride=true
+    elif jq -e '.routing.rules[]? | select((.outboundTag // "" | test("^wireguard_out_IPv[46]$")) and (.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null) and (.port == null) and (.source == null) and (.user == null) and (.attrs == null))' "${routingFile}" >/dev/null 2>&1; then
+        catchallTag=$(jq -r '.routing.rules[]? | select((.outboundTag // "" | test("^wireguard_out_IPv[46]$")) and (.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null) and (.port == null) and (.source == null) and (.user == null) and (.attrs == null)) | .outboundTag' "${routingFile}" 2>/dev/null | head -1)
+        isGlobalOverride=true
     fi
 
     local guardDirectTag="z_direct_outbound"
@@ -9950,17 +9992,18 @@ EOF
         addXrayOutbound z_direct_outbound >/dev/null 2>&1 || true
     fi
 
-    jqUpdateJsonFile "${routingFile}" --argjson guards "${guardRules}" --arg catchall "${catchallTag}" '
+    jqUpdateJsonFile "${routingFile}" --argjson guards "${guardRules}" --arg catchall "${catchallTag}" --argjson isGlobal "${isGlobalOverride}" '
       .routing.type = (.routing.type // "field") |
       .routing.rules = (
         $guards +
+        (if $isGlobal then [{"type":"field","network":"tcp,udp","outboundTag":$catchall}] else [] end) +
         [ (.routing.rules // [])[] |
           select(
             (((.inboundTag // []) | any(test("^dokodemo-in"))) | not) and
-            (((.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null)) | not)
+            (((.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null) and (.port == null) and (.source == null) and (.user == null) and (.attrs == null)) | not)
           )
         ] +
-        [{"type":"field","network":"tcp,udp","outboundTag":$catchall}]
+        (if $isGlobal then [] else [{"type":"field","network":"tcp,udp","outboundTag":$catchall}] end)
       )' || return 1
 }
 
@@ -10245,7 +10288,11 @@ showWireGuardDomain() {
     if [[ "${coreInstallType}" == "1" ]]; then
         if [[ -f "${configPath}09_routing.json" ]]; then
             echoContent yellow "Xray-core"
-            jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -r
+            if jq -e ".routing.rules[]? | select(.outboundTag==\"wireguard_out_${type}\" and (.domain == null) and (.ip == null) and (.network == \"tcp,udp\"))" "${configPath}09_routing.json" >/dev/null 2>&1; then
+                echoContent green " ---> 已设置warp ${type}全局分流"
+            else
+                jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -r
+            fi
         elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}wireguard_out_${type}.json" ]]; then
             echoContent yellow "Xray-core"
             echoContent green " ---> 已设置warp ${type}全局分流"
@@ -10418,19 +10465,23 @@ warpRoutingReg() {
             }
             if [[ "${coreInstallType}" == "1" ]]; then
                 addXrayOutbound "wireguard_out_${type}"
-                if [[ "${type}" == "IPv4" ]]; then
-                    removeXrayOutbound "wireguard_out_IPv6"
-                elif [[ "${type}" == "IPv6" ]]; then
-                    removeXrayOutbound "wireguard_out_IPv4"
+                if [[ ! -f "${configPath}09_routing.json" ]]; then
+                    cat <<EOF >"${configPath}09_routing.json"
+{
+  "routing": {
+    "type": "field",
+    "rules": []
+  }
+}
+EOF
                 fi
-
-                removeXrayOutbound IPv4_out
-                removeXrayOutbound IPv6_out
-                removeXrayOutbound z_direct_outbound
-                removeXrayOutbound blackhole_out
-                removeXrayOutbound socks5_outbound
-
-                rm ${configPath}09_routing.json >/dev/null 2>&1
+                jqUpdateJsonFile "${configPath}09_routing.json" --arg wgTag "wireguard_out_${type}" '
+                  .routing.type = (.routing.type // "field") |
+                  .routing.rules = (
+                    [{"type":"field","network":"tcp,udp","outboundTag":$wgTag}] +
+                    [ (.routing.rules // [])[] | select(((.domain == null) and (.ip == null) and (.inboundTag == null) and (.protocol == null) and (.port == null) and (.source == null) and (.user == null) and (.attrs == null)) | not) ]
+                  )' || return 1
+                ensureXrayBaseRoutingRules "${configPath}09_routing.json" || return 1
             fi
 
             if [[ -n "${singBoxConfigPath}" ]]; then
@@ -10472,6 +10523,7 @@ warpRoutingReg() {
 
             removeXrayOutbound "wireguard_out_${type}"
             addXrayOutbound "z_direct_outbound"
+            ensureXrayBaseRoutingRules "${configPath}09_routing.json" || return 1
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
@@ -15366,7 +15418,12 @@ manageReality() {
             return 0
         fi
         if [[ "${coreInstallType}" == "1" ]]; then
-            ensureXrayBaseRoutingRules "${configPath}09_routing.json" || true
+            if ! ensureXrayBaseRoutingRules "${configPath}09_routing.json"; then
+                echoContent red " ---> Xray 路由 SNI 同步失败，已终止重启与订阅同步"
+                read -r -p "按回车键返回 REALITY 管理..." _
+                manageReality 1
+                return 1
+            fi
         fi
 
         echoContent skyBlue " ---> 正在重启服务并同步更新订阅..."
@@ -15639,7 +15696,7 @@ singBoxVersionManageMenu() {
     fi
     if [[ "${selectSingBoxType}" == "1" ]]; then
         prereleaseStatus=false
-        installSingBox 1 || return 1
+        installSingBox 1 false force || return 1
         if [[ -f "${singBoxConfigPath}00_socks5_guard.json" ]]; then
             singBoxMergeConfig preserve || return 1
             socks5SingBoxService stop && socks5SingBoxService start
@@ -15651,7 +15708,7 @@ singBoxVersionManageMenu() {
         singBoxVersionManageMenu 1
     elif [[ "${selectSingBoxType}" == "2" ]]; then
         prereleaseStatus=true
-        installSingBox 1 || return 1
+        installSingBox 1 true force || return 1
         if [[ -f "${singBoxConfigPath}00_socks5_guard.json" ]]; then
             singBoxMergeConfig preserve || return 1
             socks5SingBoxService stop && socks5SingBoxService start
@@ -15822,7 +15879,7 @@ menu() {
     readSingBoxConfig >/dev/null 2>&1
 
     echoContent skyBlue "\n╭──────────────────────────────────────────────────────────────╮"
-    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr11        快捷命令: vasma  │"
+    echoContent green   "│  v2ray-agent (修改版) - v3.5.42-pr12        快捷命令: vasma  │"
     echoContent skyBlue "╰──────────────────────────────────────────────────────────────╯"
     showInstallStatus
     checkWgetShowProgress
